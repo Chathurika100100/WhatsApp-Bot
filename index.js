@@ -112,7 +112,7 @@ async function startBot() {
             groupNameInput = groupNameInput.replace(/[\[\]]/g, '').trim();
 
             if (!groupNameInput || links.length === 0) {
-                await sock.sendMessage(from, { text: '❌ කරුණාකර නිවැරදිව ඇතුලත් කරන්න.\nනියැදිය: .sg RV Games https://link1.com https://link2.com' }, { quoted: msg });
+                await sock.sendMessage(from, { text: '❌ කරුණාකර නිවැරදිව ඇතුලත් කරන්න.\nනියැදිය: .sg RV Games https://link1.com' }, { quoted: msg });
                 return;
             }
 
@@ -128,14 +128,16 @@ async function startBot() {
                     return;
                 }
 
-                // 📊 සාර්ථක සහ අසාර්ථක ලින්ක්ස් ගණන් කිරීමට විචල්‍යයන් (Variables)
                 let successCount = 0;
                 let failCount = 0;
+                
+                // සම්පූර්ණ වැඩේට යන වෙලාව මැනීමට
+                const jobStartTime = performance.now();
 
                 for (let i = 0; i < links.length; i++) {
                     const link = links[i];
                     try {
-                        await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${links.length}):\n🔗 ${link}` });
+                        await sock.sendMessage(from, { text: `📥 გොනුව බාගත වෙමින් පවතී (${i + 1}/${links.length}):\n🔗 ${link}` });
                         
                         const response = await axios({ method: 'get', url: link, responseType: 'arraybuffer' });
                         const buffer = Buffer.from(response.data, 'binary');
@@ -153,22 +155,35 @@ async function startBot() {
                             caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
                         });
 
-                        successCount++; // සාර්ථක නම් 1ක් එකතු කරයි
+                        successCount++; 
                     } catch (err) {
-                        failCount++; // අසාර්ථක නම් 1ක් එකතු කරයි
+                        failCount++; 
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි (Link ${i+1}): ${err.message}` });
                     }
                 }
 
-                // 🎉 ලස්සනට එන අන්තිම "DONE" SUMMARY මැසේජ් එක 
-                const doneMessage = `🎉 *𝚃𝙰𝚂𝙊 𝙲𝙾𝙼𝙿𝙻𝙴𝚃𝙴𝙳 𝚂𝚄𝙲𝙲𝙴𝚂𝚂𝙵𝚄𝙻𝙻𝚈!* 🎉\n\n` +
-                                    `✅ *Status:* Done\n` +
-                                    `👥 *Group:* ${targetGroup.subject}\n` +
-                                    `📦 *Total Links:* ${links.length}\n` +
-                                    `📤 *Uploaded:* ${successCount}\n` +
-                                    `❌ *Failed:* ${failCount}\n\n` +
-                                    `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
+                // ⏱️ ගතවූ මුළු කාලය ගණනය කිරීම (තත්පර වලින්)
+                const jobEndTime = performance.now();
+                const timeTaken = ((jobEndTime - jobStartTime) / 1000).toFixed(1);
 
+                // 📊 ප්‍රගති තීරුව (Progress Bar) නිර්මාණය
+                const totalLinks = links.length;
+                const successPercentage = Math.round((successCount / totalLinks) * 10);
+                const progressBar = '🟩'.repeat(successPercentage) + '⬜'.repeat(10 - successPercentage);
+
+                // ✨ උපරිමයෙන්ම හැඩගැන්වූ නව "DONE" මැසේජ් එක 
+                const doneMessage = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
+                                    `    ⚙️ *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂* ⚙️\n` +
+                                    `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
+                                            
+                                    `┌────────────────────────\n` +
+                                    `│ ✅ *Status:* Done\n` +
+                                    `│ 📦 *Total Parts:* ${totalLinks}\n` +
+                                    `│ ⏱️ *Time Taken:* ${timeTaken}s\n` +
+                                    `└────────────────────────\n\n` +
+                                    `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
+
+                // ඔයාට (කමාන්ඩ් එක දාපු චැට් එකට) Done මැසේජ් එක යැවීම
                 await sock.sendMessage(from, { text: doneMessage }, { quoted: msg });
 
             } catch (error) {
