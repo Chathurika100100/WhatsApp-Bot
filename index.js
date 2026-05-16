@@ -59,7 +59,7 @@ async function startBot() {
                              `⚙️ *ප්‍රධාන විධානයන්:*\n` +
                              `👉 📄 \`.menu\` - මෙම මෙනුව ලබා ගැනීමට.\n` +
                              `👉 ⚡ \`.speed\` - සර්වර් එකේ වේගය (Speed Test) බැලීමට.\n` +
-                             `👉 📥 \`.sg [GroupName] [Link1] [Link2]\` - ලින්ක් මඟින් ගොනු ඩවුන්ලෝඩ් කර අදාළ සමූහයට යැවීමට.\n\n` +
+                             `👉 📥 \`.sg [GroupName] [Link1] [Link2]\` - ලින්ක් มඟින් ගොනු ඩවුන්ලෝඩ් කර අදාළ සමූහයට යැවීමට.\n\n` +
                              `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
                              
             await sock.sendMessage(from, { text: menuText }, { quoted: msg });
@@ -128,16 +128,13 @@ async function startBot() {
                     return;
                 }
 
-                let successCount = 0;
-                let failCount = 0;
-                
-                // සම්පූර්ණ වැඩේට යන වෙලාව මැනීමට
                 const jobStartTime = performance.now();
+                const totalLinks = links.length;
 
-                for (let i = 0; i < links.length; i++) {
+                for (let i = 0; i < totalLinks; i++) {
                     const link = links[i];
                     try {
-                        await sock.sendMessage(from, { text: `📥 გොනුව බාගත වෙමින් පවතී (${i + 1}/${links.length}):\n🔗 ${link}` });
+                        await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${totalLinks}):\n🔗 ${link}` });
                         
                         const response = await axios({ method: 'get', url: link, responseType: 'arraybuffer' });
                         const buffer = Buffer.from(response.data, 'binary');
@@ -155,27 +152,17 @@ async function startBot() {
                             caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
                         });
 
-                        successCount++; 
                     } catch (err) {
-                        failCount++; 
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි (Link ${i+1}): ${err.message}` });
                     }
                 }
 
-                // ⏱️ ගතවූ මුළු කාලය ගණනය කිරීම (තත්පර වලින්)
                 const jobEndTime = performance.now();
                 const timeTaken = ((jobEndTime - jobStartTime) / 1000).toFixed(1);
 
-                // 📊 ප්‍රගති තීරුව (Progress Bar) නිර්මාණය
-                const totalLinks = links.length;
-                const successPercentage = Math.round((successCount / totalLinks) * 10);
-                const progressBar = '🟩'.repeat(successPercentage) + '⬜'.repeat(10 - successPercentage);
-
-                // ✨ උපරිමයෙන්ම හැඩගැන්වූ නව "DONE" මැසේජ් එක 
                 const doneMessage = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                                    `    ⚙️ *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂* ⚙️\n` +
+                                    `     ⚙️ *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂* ⚙️\n` +
                                     `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
-                                            
                                     `┌────────────────────────\n` +
                                     `│ ✅ *Status:* Done\n` +
                                     `│ 📦 *Total Parts:* ${totalLinks}\n` +
@@ -183,8 +170,11 @@ async function startBot() {
                                     `└────────────────────────\n\n` +
                                     `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
 
-                // ඔයාට (කමාන්ඩ් එක දාපු චැට් එකට) Done මැසේජ් එක යැවීම
-                await sock.sendMessage(from, { text: doneMessage }, { quoted: msg });
+                // 🌟 වෙනස් කළ ස්ථානය: මෙන්න මෙතනින් Done මැසේජ් එක කෙලින්ම ගෲප් එක ඇතුලටම (targetGroup.id) සෙන්ඩ් වෙනවා
+                await sock.sendMessage(targetGroup.id, { text: doneMessage });
+
+                // කමාන්ඩ් එක දාපු කෙනාටත් වැඩේ ඉවරයි කියලා දැනගන්න පොඩි කන්ෆර්මේෂන් එකක් යැවීම (Optional)
+                await sock.sendMessage(from, { text: `✅ සියලුම ගොනු සහ සාරාංශය (Summary) '${targetGroup.subject}' සමූහයට සාර්ථකව යවන ලදී!` }, { quoted: msg });
 
             } catch (error) {
                 await sock.sendMessage(from, { text: `❌ පද්ධති දෝෂයකි: ${error.message}` }, { quoted: msg });
