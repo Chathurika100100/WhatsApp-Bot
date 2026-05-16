@@ -105,14 +105,10 @@ async function startBot() {
         if (text.startsWith('.sg ')) {
             const commandBody = text.slice(4).trim();
             
-            // 🔍 Regex එකක් මඟින් මැසේජ් එකේ තියෙන සියලුම ලින්ක්ස් (URLs) වෙන් කර ගැනීම
             const urlRegex = /(https?:\/\/[^\s]+)/g;
             const links = commandBody.match(urlRegex) || [];
             
-            // 🏷️ ලින්ක් ටික මැසේජ් එකෙන් අයින් කරලා ඉතිරි වෙන කොටස Group Name එක විදිහට ගැනීම (මෙහිදී spaces ආරක්ෂා වේ)
             let groupNameInput = commandBody.replace(urlRegex, '').trim();
-            
-            // bracket [ ] තිබුනොත් ඒවා අයින් කර සුද්ද කිරීම
             groupNameInput = groupNameInput.replace(/[\[\]]/g, '').trim();
 
             if (!groupNameInput || links.length === 0) {
@@ -125,31 +121,30 @@ async function startBot() {
             try {
                 const getGroups = await sock.groupFetchAllParticipating();
                 const groups = Object.values(getGroups);
-                
-                // හිස්තැන් සහිත නම නිවැරදිව සන්සන්දනය කිරීම
                 const targetGroup = groups.find(g => g.subject.toLowerCase().trim() === groupNameInput.toLowerCase());
 
                 if (!targetGroup) {
-                    await sock.sendMessage(from, { text: `❌ '${groupNameInput}' නමින් සමූහයක් සොයාගත නොහැකි විය!\n(කරුණාකර සමූහයේ නමේ අකුරු සහ Spaces නිවැරදිදැයි බලන්න)` }, { quoted: msg });
+                    await sock.sendMessage(from, { text: `❌ '${groupNameInput}' නමින් සමූහයක් සොයාගත නොහැකි විය!` }, { quoted: msg });
                     return;
                 }
+
+                // 📊 සාර්ථක සහ අසාර්ථක ලින්ක්ස් ගණන් කිරීමට විචල්‍යයන් (Variables)
+                let successCount = 0;
+                let failCount = 0;
 
                 for (let i = 0; i < links.length; i++) {
                     const link = links[i];
                     try {
-                        await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${links.length}): ${link}` });
+                        await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${links.length}):\n🔗 ${link}` });
                         
                         const response = await axios({ method: 'get', url: link, responseType: 'arraybuffer' });
                         const buffer = Buffer.from(response.data, 'binary');
                         
-                        // URL එකෙන් පිරිසිදු ෆයිල් නම වෙන් කරගැනීම
                         let fileName = `file_${Date.now()}`;
                         try {
                             const parsedUrl = new URL(link);
                             fileName = path.basename(parsedUrl.pathname) || fileName;
-                        } catch (e) {
-                            // URL එකේ ෆයිල් නමක් නැත්නම් සාමාන්‍ය නමක් දීම
-                        }
+                        } catch (e) {}
 
                         await sock.sendMessage(targetGroup.id, {
                             document: buffer,
@@ -157,11 +152,25 @@ async function startBot() {
                             mimetype: response.headers['content-type'] || 'application/octet-stream',
                             caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
                         });
+
+                        successCount++; // සාර්ථක නම් 1ක් එකතු කරයි
                     } catch (err) {
+                        failCount++; // අසාර්ථක නම් 1ක් එකතු කරයි
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි (Link ${i+1}): ${err.message}` });
                     }
                 }
-                await sock.sendMessage(from, { text: '✅ සියලුම ගොනු සමූහයට සාර්ථකව යවන ලදී!' }, { quoted: msg });
+
+                // 🎉 ලස්සනට එන අන්තිම "DONE" SUMMARY මැසේජ් එක 
+                const doneMessage = `🎉 *𝚃𝙰𝚂𝙊 𝙲𝙾𝙼𝙿𝙻𝙴𝚃𝙴𝙳 𝚂𝚄𝙲𝙲𝙴𝚂𝚂𝙵𝚄𝙻𝙻𝚈!* 🎉\n\n` +
+                                    `✅ *Status:* Done\n` +
+                                    `👥 *Group:* ${targetGroup.subject}\n` +
+                                    `📦 *Total Links:* ${links.length}\n` +
+                                    `📤 *Uploaded:* ${successCount}\n` +
+                                    `❌ *Failed:* ${failCount}\n\n` +
+                                    `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
+
+                await sock.sendMessage(from, { text: doneMessage }, { quoted: msg });
+
             } catch (error) {
                 await sock.sendMessage(from, { text: `❌ පද්ධති දෝෂයකි: ${error.message}` }, { quoted: msg });
             }
