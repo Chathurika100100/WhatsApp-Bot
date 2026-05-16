@@ -71,25 +71,22 @@ async function startBot() {
             await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී, කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
             
             try {
-                // Ping පරීක්ෂා කිරීම
                 const pingStart = performance.now();
                 await axios.get('https://www.google.com');
                 const ping = (performance.now() - pingStart).toFixed(0);
 
-                // Download Speed පරීක්ෂා කිරීම (Cloudflare එකෙන් 1MB එකක් බාගත කිරීම)
                 const dlStart = performance.now();
                 await axios.get('https://speed.cloudflare.com/__down?bytes=1048576', { responseType: 'arraybuffer' });
                 const dlEnd = performance.now();
                 const dlTime = (dlEnd - dlStart) / 1000; 
-                const downloadSpeed = (1 / dlTime).toFixed(2); // MB/s වලින්
+                const downloadSpeed = (1 / dlTime).toFixed(2); 
 
-                // Upload Speed පරීක්ෂා කිරීම (1MB ඩමි බෆර් එකක් HTTPBin එකට අප්ලෝඩ් කිරීම)
                 const ulStart = performance.now();
                 const dummyBuffer = Buffer.alloc(1048576); 
                 await axios.post('https://httpbin.org/post', dummyBuffer);
                 const ulEnd = performance.now();
                 const ulTime = (ulEnd - ulStart) / 1000;
-                const uploadSpeed = (1 / ulTime).toFixed(2); // MB/s වලින්
+                const uploadSpeed = (1 / ulTime).toFixed(2); 
 
                 const speedResult = `⚡ *𝚂𝙴𝚁𝚅𝙴𝚁 𝚂𝙿𝙴𝙴𝙳 𝚃𝙴𝚂𝚃 𝚁𝙴𝚂𝚄𝙻𝚃𝚂*\n\n` +
                                     `🔹 *Ping:* ${ping} ms\n` +
@@ -106,24 +103,34 @@ async function startBot() {
 
         // 3. FILE DOWNLOAD & FORWARD (.sg)
         if (text.startsWith('.sg ')) {
-            const args = text.slice(4).trim().split(/\s+/);
-            if (args.length < 2) {
-                await sock.sendMessage(from, { text: '❌ කරුණාකර නිවැරදිව ඇතුලත් කරන්න.\nනියැදිය: .sg [GroupName] [Link1]' }, { quoted: msg });
+            const commandBody = text.slice(4).trim();
+            
+            // 🔍 Regex එකක් මඟින් මැසේජ් එකේ තියෙන සියලුම ලින්ක්ස් (URLs) වෙන් කර ගැනීම
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const links = commandBody.match(urlRegex) || [];
+            
+            // 🏷️ ලින්ක් ටික මැසේජ් එකෙන් අයින් කරලා ඉතිරි වෙන කොටස Group Name එක විදිහට ගැනීම (මෙහිදී spaces ආරක්ෂා වේ)
+            let groupNameInput = commandBody.replace(urlRegex, '').trim();
+            
+            // bracket [ ] තිබුනොත් ඒවා අයින් කර සුද්ද කිරීම
+            groupNameInput = groupNameInput.replace(/[\[\]]/g, '').trim();
+
+            if (!groupNameInput || links.length === 0) {
+                await sock.sendMessage(from, { text: '❌ කරුණාකර නිවැරදිව ඇතුලත් කරන්න.\nනියැදිය: .sg RV Games https://link1.com https://link2.com' }, { quoted: msg });
                 return;
             }
-
-            const groupNameInput = args[0].replace('[', '').replace(']', '');
-            const links = args.slice(1).map(l => l.replace('[', '').replace(']', ''));
 
             await sock.sendMessage(from, { text: `⏳ '${groupNameInput}' සමූහය සොයමින් පවතී...` }, { quoted: msg });
 
             try {
                 const getGroups = await sock.groupFetchAllParticipating();
                 const groups = Object.values(getGroups);
-                const targetGroup = groups.find(g => g.subject.toLowerCase() === groupNameInput.toLowerCase());
+                
+                // හිස්තැන් සහිත නම නිවැරදිව සන්සන්දනය කිරීම
+                const targetGroup = groups.find(g => g.subject.toLowerCase().trim() === groupNameInput.toLowerCase());
 
                 if (!targetGroup) {
-                    await sock.sendMessage(from, { text: `❌ '${groupNameInput}' නමින් සමූහයක් සොයාගත නොහැකි විය!` }, { quoted: msg });
+                    await sock.sendMessage(from, { text: `❌ '${groupNameInput}' නමින් සමූහයක් සොයාගත නොහැකි විය!\n(කරුණාකර සමූහයේ නමේ අකුරු සහ Spaces නිවැරදිදැයි බලන්න)` }, { quoted: msg });
                     return;
                 }
 
@@ -134,14 +141,21 @@ async function startBot() {
                         
                         const response = await axios({ method: 'get', url: link, responseType: 'arraybuffer' });
                         const buffer = Buffer.from(response.data, 'binary');
-                        const fileName = path.basename(new URL(link).pathname) || `file_${Date.now()}`;
+                        
+                        // URL එකෙන් පිරිසිදු ෆයිල් නම වෙන් කරගැනීම
+                        let fileName = `file_${Date.now()}`;
+                        try {
+                            const parsedUrl = new URL(link);
+                            fileName = path.basename(parsedUrl.pathname) || fileName;
+                        } catch (e) {
+                            // URL එකේ ෆයිල් නමක් නැත්නම් සාමාන්‍ය නමක් දීම
+                        }
 
-                        // ගෲප් එකට ෆයිල් එක සහ Caption (Watermark) එක යැවීම
                         await sock.sendMessage(targetGroup.id, {
                             document: buffer,
                             fileName: fileName,
                             mimetype: response.headers['content-type'] || 'application/octet-stream',
-                            caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*` // මෙතනින් Watermark එක එකතු වේ
+                            caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
                         });
                     } catch (err) {
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි (Link ${i+1}): ${err.message}` });
