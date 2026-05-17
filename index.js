@@ -60,7 +60,7 @@ async function resolveDirectLink(url) {
     return url;
 }
 
-// 🔍 FITGIRL FUNCTIONS
+// 🔍 FITGIRL FUNCTIONS: Search games
 async function searchFitGirl(query) {
     try {
         const url = `https://fitgirl-repacks.site/?s=${encodeURIComponent(query)}`;
@@ -84,7 +84,7 @@ async function searchFitGirl(query) {
     }
 }
 
-// 🎯 EXTRACT RAW FUCKINGFAST LINKS
+// 🎯 EXTRACT RAW FUCKINGFAST LINKS (Deep Scraping for Paste Pages)
 async function getFitGirlLinks(pageUrl) {
     try {
         const response = await axios.get(pageUrl, {
@@ -93,15 +93,43 @@ async function getFitGirlLinks(pageUrl) {
         const $ = cheerio.load(response.data);
         let mirrors = [];
 
-        $('div.entry-content ul li').each((i, el) => {
-            const text = $(el).text().trim();
-            const link = $(el).find('a').attr('href');
-            
-            if (link && (link.includes('fuckingfast') || text.includes('FuckingFast') || text.includes('Fucking Fast'))) {
-                mirrors.push(link);
+        // 1. මුලින්ම ප්‍රධාන පේජ් එකේ තියෙන FuckingFast ලින්ක්ස් ටික එකතු කරගන්නවා
+        $('div.entry-content ul li a').each((i, el) => {
+            const href = $(el).attr('href');
+            if (href && href.includes('fuckingfast.co')) {
+                mirrors.push(href);
             }
         });
-        return mirrors;
+
+        // 2. වැදගත්ම කොටස: එකතු කරගත් ලින්ක් එකක් "paste.fitgirl-repacks.site" වගේ එකක් නම්, ඒක ඇතුළට ගිහින් සැබෑ ලින්ක්ස් ටික හාරලා ගන්නවා
+        let finalPartLinks = [];
+        for (let link of mirrors) {
+            if (link.includes('paste.fitgirl-repacks.site') || link.includes('/?')) {
+                try {
+                    const pasteRes = await axios.get(link, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
+                    const $paste = cheerio.load(pasteRes.data);
+                    
+                    $paste('a').each((j, elElement) => {
+                        const directHref = $paste(elElement).attr('href');
+                        // මෙතනදී .rar, .zip හෝ fuckingfast එකේ download ලින්ක්ස් ටික වෙන් කරගන්නවා
+                        if (directHref && directHref.includes('fuckingfast.co') && !directHref.includes('paste.fitgirl')) {
+                            if (!finalPartLinks.includes(directHref)) {
+                                finalPartLinks.push(directHref);
+                            }
+                        }
+                    });
+                } catch (err) {
+                    console.error("Error reading paste page:", err.message);
+                }
+            } else {
+                if (!finalPartLinks.includes(link)) {
+                    finalPartLinks.push(link);
+                }
+            }
+        }
+
+        // Setup.exe එක විතරක් තියෙන ලින්ක් එක අයින් කරලා, .part001.rar වගේ තියෙන සැබෑ ගේම් ෆයිල්ස් විතරක් ඉතිරි කරගන්නවා
+        return finalPartLinks.filter(l => !l.toLowerCase().includes('setup_proper.exe') && !l.toLowerCase().includes('setup.exe'));
     } catch (error) {
         console.error("Link Fetch Error:", error);
         return [];
@@ -324,6 +352,7 @@ async function startBot() {
                 const selectedGame = userSessions[from][index];
                 await sock.sendMessage(from, { text: `⏳ *${selectedGame.title}* හි FuckingFast ලින්ක්ස් පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
                 
+                // Deep scraped links list
                 const links = await getFitGirlLinks(selectedGame.link);
                 if (links.length === 0) return await sock.sendMessage(from, { text: '❌ මෙම ගේම් එක සඳහා FuckingFast ලින්ක්ස් හමු නොවිය.' }, { quoted: msg });
 
