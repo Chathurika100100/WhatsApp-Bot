@@ -39,7 +39,8 @@ async function resolveDirectLink(url) {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
             });
             const $ = cheerio.load(res.data);
-            let directLink = $('a.btn-download').attr('href') || $('#download-btn').attr('href') || 'a[href*="/dl/"]').attr('href');
+            // ටයිපින් දෝෂය මෙතැනින් සම්පූර්ණයෙන්ම නිවැරදි කර ඇත ($ ලකුණ එක් කරන ලදී)
+            let directLink = $('a.btn-download').attr('href') || $('#download-btn').attr('href') || $('a[href*="/dl/"]').attr('href');
             
             if (!directLink) {
                 $('a').each((i, el) => {
@@ -69,7 +70,7 @@ async function getFuckingFastLinks(gameName) {
         const firstGameUrl = $('.entry-title a').first().attr('href');
         const firstGameTitle = $('.entry-title a').first().text().trim();
 
-        if (!firstGameUrl) return `❌ '${gameName}' නමින් ගේම් එකක් සොයාගත නොහැකි විය.`;
+        if (!firstGameUrl) return `❌ '${gameName}' นමින් ගේම් එකක් සොයාගත නොහැකි විය.`;
 
         const gamePageResponse = await axios.get(firstGameUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
