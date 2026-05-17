@@ -19,6 +19,12 @@ if (process.env.SESSION_ID) {
     }
 }
 
+// Temporary ෆෝල්ඩර් එක නිර්මාණය කිරීම (ලොකු ෆයිල් තියාගන්න)
+const tempFolder = './temp_downloads';
+if (!fs.existsSync(tempFolder)) {
+    fs.mkdirSync(tempFolder);
+}
+
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
 
@@ -82,7 +88,7 @@ async function startBot() {
                 const dlTime = (dlEnd - dlStart) / 1000; 
                 const downloadSpeed = ((1 / dlTime) * 8).toFixed(2); 
 
-                // Upload Speed Test (Mbps වලින්) - මෙන්න මේ පේළිය දැන් නිවැරදි කර ඇත!
+                // Upload Speed Test (Mbps වලින්)
                 const ulStart = performance.now();
                 const dummyBuffer = Buffer.alloc(1048576); 
                 await axios.post('https://httpbin.org/post', dummyBuffer);
@@ -103,7 +109,7 @@ async function startBot() {
             return;
         }
 
-        // 3. FILE DOWNLOAD & FORWARD (.sg)
+        // 3. FILE DOWNLOAD & FORWARD (.sg) - ලොකු ෆයිල් සඳහා සකස් කරන ලද කොටස
         if (text.startsWith('.sg ')) {
             const commandBody = text.slice(4).trim();
             
@@ -135,27 +141,57 @@ async function startBot() {
 
                 for (let i = 0; i < totalLinks; i++) {
                     const link = links[i];
+                    let tempFilePath = '';
+                    
                     try {
                         await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${totalLinks}):\n🔗 ${link}` });
                         
-                        const response = await axios({ method: 'get', url: link, responseType: 'arraybuffer' });
-                        const buffer = Buffer.from(response.data, 'binary');
-                        
+                        // ෆයිල් එකේ නම වෙන්කර ගැනීම
                         let fileName = `file_${Date.now()}`;
                         try {
                             const parsedUrl = new URL(link);
                             fileName = path.basename(parsedUrl.pathname) || fileName;
                         } catch (e) {}
 
+                        tempFilePath = path.join(tempFolder, fileName);
+
+                        // ⚡ RAM එක බේරාගෙන කෙලින්ම Disk එකට Stream එකක් මඟින් ලොකු ෆයිල් ඩවුන්ලෝඩ් කිරීම
+                        const response = await axios({
+                            method: 'get',
+                            url: link,
+                            responseType: 'stream',
+                            maxContentLength: Infinity,
+                            maxBodyLength: Infinity,
+                            timeout: 0 // ලොකු ෆයිල් නිසා ටයිම් අවුට් වීම වැළැක්වීම
+                        });
+
+                        const writer = fs.createWriteStream(tempFilePath);
+                        response.data.pipe(writer);
+
+                        await new Promise((resolve, reject) => {
+                            writer.on('finish', resolve);
+                            writer.on('error', reject);
+                        });
+
+                        // 📤 Baileys හරහා ලෝකල් ෆයිල් එකක් ලෙස ගෲප් එකට සෙන්ඩ් කිරීම (RAM වැය නොවේ)
                         await sock.sendMessage(targetGroup.id, {
-                            document: buffer,
+                            document: { url: tempFilePath },
                             fileName: fileName,
                             mimetype: response.headers['content-type'] || 'application/octet-stream',
                             caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
                         });
 
+                        // 🗑️ යවා අවසන් වූ වහාම සර්වර් එකේ ඉඩ ඉතිරි කරගැනීමට ෆයිල් එක මැකීම
+                        if (fs.existsSync(tempFilePath)) {
+                            fs.unlinkSync(tempFilePath);
+                        }
+
                     } catch (err) {
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි (Link ${i+1}): ${err.message}` });
+                        // දෝෂයක් ආවත් ඉතුරු වෙන තාවකාලික ෆයිල් මැකීම
+                        if (tempFilePath && fs.existsSync(tempFilePath)) {
+                            fs.unlinkSync(tempFilePath);
+                        }
                     }
                 }
 
@@ -172,10 +208,7 @@ async function startBot() {
                                     `└────────────────────────\n\n` +
                                     `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
 
-                // Done මැසේජ් එක කෙලින්ම ගෲප් එක ඇතුලටම යැවීම
                 await sock.sendMessage(targetGroup.id, { text: doneMessage });
-
-                // කමාන්ඩ් එක දාපු කෙනාට යන කන්ෆර්මේෂන් මැසේජ් එක
                 await sock.sendMessage(from, { text: `✅ සියලුම ගොනු සහ සාරාංශය (Summary) '${targetGroup.subject}' සමූහයට සාර්ථකව යවන ලදී!` }, { quoted: msg });
 
             } catch (error) {
