@@ -81,14 +81,14 @@ async function startBot() {
                 await axios.get('https://www.google.com');
                 const ping = (performance.now() - pingStart).toFixed(0);
 
-                // Download Speed Test (Mbps වලින්)
+                // Download Speed Test
                 const dlStart = performance.now();
                 await axios.get('https://speed.cloudflare.com/__down?bytes=1048576', { responseType: 'arraybuffer' });
                 const dlEnd = performance.now();
                 const dlTime = (dlEnd - dlStart) / 1000; 
                 const downloadSpeed = ((1 / dlTime) * 8).toFixed(2); 
 
-                // Upload Speed Test (Mbps වලින්)
+                // Upload Speed Test
                 const ulStart = performance.now();
                 const dummyBuffer = Buffer.alloc(1048576); 
                 await axios.post('https://httpbin.org/post', dummyBuffer);
@@ -109,7 +109,7 @@ async function startBot() {
             return;
         }
 
-        // 3. FILE DOWNLOAD & FORWARD (.sg) - නියම නම හඳුනාගැනීමේ නව තාක්ෂණය සමඟ
+        // 3. FILE DOWNLOAD & FORWARD (.sg) - 🌟 LIVE PROGRESS BAR සමඟ
         if (text.startsWith('.sg ')) {
             const commandBody = text.slice(4).trim();
             
@@ -144,20 +144,17 @@ async function startBot() {
                     let tempFilePath = '';
                     
                     try {
-                        await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${totalLinks}):\n🔗 ${link}` });
-                        
-                        // 1. මුලින්ම ලින්ක් එක පිරිසිදු කර මූලික නමක් හදාගැනීම
+                        // මුලින්ම සාමාන්‍ය නමක් දමා පසුව Header වලින් නියම නම සොයයි
                         let realFileName = `file_${Date.now()}.bin`;
                         try {
                             const parsedUrl = new URL(link);
                             let baseName = path.basename(parsedUrl.pathname);
                             if (baseName) {
-                                // ? සහ # සලකුණුවලින් පසු එන දේවල් ඉවත් කිරීම
                                 realFileName = decodeURIComponent(baseName).split('?')[0].split('#')[0];
                             }
                         } catch (e) {}
 
-                        // ⚡ සර්වර් එකට සම්බන්ධ වීම (Stream එකක් ලෙස)
+                        // සර්වර් එකට සම්බන්ධ වීම
                         const response = await axios({
                             method: 'get',
                             url: link,
@@ -167,7 +164,7 @@ async function startBot() {
                             timeout: 0
                         });
 
-                        // 2. 🌟 සර්වර් එකෙන් නිල නමක් (Content-Disposition) එවා ඇත්නම් එය ලබාගැනීම
+                        // Content-Disposition වලින් නියම නම ලබා ගැනීම
                         const contentDisposition = response.headers['content-disposition'];
                         if (contentDisposition) {
                             const fileNameMatch = contentDisposition.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i);
@@ -180,13 +177,46 @@ async function startBot() {
                                 }
                             }
                         }
-                        
-                        // නමේ ඇති අනවශ්‍ය Quotes අයින් කිරීම
                         realFileName = realFileName.replace(/["']/g, "").trim();
 
-                        // සර්වර් එක ඇතුලට සේව් වෙන්න ආරක්ෂිත තාවකාලික නමක් සෑදීම
                         const localSafeName = `temp_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
                         tempFilePath = path.join(tempFolder, localSafeName);
+
+                        // 📊 Progress Bar එක සඳහා මූලික මැසේජ් එක යැවීම
+                        const initialText = `📥 *Downloading:* ${realFileName}\n📊 ▱▱▱▱▱▱▱▱▱▱ 0.0%\n📦 0.0MB / Calculating...`;
+                        const progressMsg = await sock.sendMessage(from, { text: initialText });
+                        const msgKey = progressMsg.key;
+
+                        const totalBytes = parseInt(response.headers['content-length'], 10) || 0;
+                        let downloadedBytes = 0;
+                        let lastUpdateTime = Date.now();
+
+                        // 🔄 ඩවුන්ලෝඩ් වන අතරතුර මැසේජ් එක Live Update කිරීම
+                        response.data.on('data', async (chunk) => {
+                            downloadedBytes += chunk.length;
+                            const now = Date.now();
+
+                            // තත්පර 2.5කට වරක් පමණක් මැසේජ් එක අප්ඩේට් කරයි (Rate Limit වැළැක්වීමට)
+                            if (now - lastUpdateTime > 2500) {
+                                lastUpdateTime = now;
+                                const percentage = totalBytes ? ((downloadedBytes / totalBytes) * 100).toFixed(1) : 0;
+                                const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                                const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+
+                                const totalBlocks = 10;
+                                const filledBlocks = totalBytes ? Math.round((percentage / 100) * totalBlocks) : 0;
+                                const emptyBlocks = totalBlocks - filledBlocks;
+                                const progressBar = '▰'.repeat(filledBlocks) + '▱'.repeat(emptyBlocks);
+
+                                const progressText = `📥 *Downloading:* ${realFileName}\n` +
+                                                     `📊 ${progressBar} ${totalBytes ? percentage + '%' : 'Streaming...'}\n` +
+                                                     `📦 ${downloadedMB}MB / ${totalBytes ? totalMB + 'MB' : 'Unknown'}`;
+
+                                try {
+                                    await sock.sendMessage(from, { text: progressText, edit: msgKey });
+                                } catch (e) {}
+                            }
+                        });
 
                         const writer = fs.createWriteStream(tempFilePath);
                         response.data.pipe(writer);
@@ -196,7 +226,14 @@ async function startBot() {
                             writer.on('error', reject);
                         });
 
-                        // 📤 වට්ස්ඇප් එකට යැවීම - මෙතනදී සැබෑ නම (realFileName) ලබා දී ඇත
+                        // 100% නිම වූ පසු අවසන් Progress මැසේජ් එක පෙන්වීම
+                        const finalDownloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                        const finalProgressText = `📥 *Downloading:* ${realFileName}\n📊 ▰▰▰▰▰▰▰▰▰▰ 100.0%\n📦 ${finalDownloadedMB}MB / ${finalDownloadedMB}MB`;
+                        try {
+                            await sock.sendMessage(from, { text: finalProgressText, edit: msgKey });
+                        } catch (e) {}
+
+                        // 📤 ගෲප් එකට ෆයිල් එක අප්ලෝඩ් කිරීම
                         await sock.sendMessage(targetGroup.id, {
                             document: { url: tempFilePath },
                             fileName: realFileName,
@@ -204,7 +241,6 @@ async function startBot() {
                             caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
                         });
 
-                        // 🗑️ යවා අවසන් වූ වහාම සර්වර් එකෙන් තාවකාලික ෆයිල් එක මැකීම
                         if (fs.existsSync(tempFilePath)) {
                             fs.unlinkSync(tempFilePath);
                         }
