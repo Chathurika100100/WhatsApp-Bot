@@ -109,7 +109,7 @@ async function startBot() {
             return;
         }
 
-        // 3. FILE DOWNLOAD & FORWARD (.sg) - ලොකු ෆයිල් සඳහා සකස් කරන ලද කොටස
+        // 3. FILE DOWNLOAD & FORWARD (.sg) - නියම නම හඳුනාගැනීමේ නව තාක්ෂණය සමඟ
         if (text.startsWith('.sg ')) {
             const commandBody = text.slice(4).trim();
             
@@ -146,24 +146,47 @@ async function startBot() {
                     try {
                         await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${totalLinks}):\n🔗 ${link}` });
                         
-                        // ෆයිල් එකේ නම වෙන්කර ගැනීම
-                        let fileName = `file_${Date.now()}`;
+                        // 1. මුලින්ම ලින්ක් එක පිරිසිදු කර මූලික නමක් හදාගැනීම
+                        let realFileName = `file_${Date.now()}.bin`;
                         try {
                             const parsedUrl = new URL(link);
-                            fileName = path.basename(parsedUrl.pathname) || fileName;
+                            let baseName = path.basename(parsedUrl.pathname);
+                            if (baseName) {
+                                // ? සහ # සලකුණුවලින් පසු එන දේවල් ඉවත් කිරීම
+                                realFileName = decodeURIComponent(baseName).split('?')[0].split('#')[0];
+                            }
                         } catch (e) {}
 
-                        tempFilePath = path.join(tempFolder, fileName);
-
-                        // ⚡ RAM එක බේරාගෙන කෙලින්ම Disk එකට Stream එකක් මඟින් ලොකු ෆයිල් ඩවුන්ලෝඩ් කිරීම
+                        // ⚡ සර්වර් එකට සම්බන්ධ වීම (Stream එකක් ලෙස)
                         const response = await axios({
                             method: 'get',
                             url: link,
                             responseType: 'stream',
                             maxContentLength: Infinity,
                             maxBodyLength: Infinity,
-                            timeout: 0 // ලොකු ෆයිල් නිසා ටයිම් අවුට් වීම වැළැක්වීම
+                            timeout: 0
                         });
+
+                        // 2. 🌟 සර්වර් එකෙන් නිල නමක් (Content-Disposition) එවා ඇත්නම් එය ලබාගැනීම
+                        const contentDisposition = response.headers['content-disposition'];
+                        if (contentDisposition) {
+                            const fileNameMatch = contentDisposition.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i);
+                            if (fileNameMatch && fileNameMatch[1]) {
+                                realFileName = decodeURIComponent(fileNameMatch[1]);
+                            } else {
+                                const fallbackMatch = contentDisposition.match(/filename=["']?([^"'\n;]+)["']?/i);
+                                if (fallbackMatch && fallbackMatch[1]) {
+                                    realFileName = fallbackMatch[1];
+                                }
+                            }
+                        }
+                        
+                        // නමේ ඇති අනවශ්‍ය Quotes අයින් කිරීම
+                        realFileName = realFileName.replace(/["']/g, "").trim();
+
+                        // සර්වර් එක ඇතුලට සේව් වෙන්න ආරක්ෂිත තාවකාලික නමක් සෑදීම
+                        const localSafeName = `temp_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+                        tempFilePath = path.join(tempFolder, localSafeName);
 
                         const writer = fs.createWriteStream(tempFilePath);
                         response.data.pipe(writer);
@@ -173,22 +196,21 @@ async function startBot() {
                             writer.on('error', reject);
                         });
 
-                        // 📤 Baileys හරහා ලෝකල් ෆයිල් එකක් ලෙස ගෲප් එකට සෙන්ඩ් කිරීම (RAM වැය නොවේ)
+                        // 📤 වට්ස්ඇප් එකට යැවීම - මෙතනදී සැබෑ නම (realFileName) ලබා දී ඇත
                         await sock.sendMessage(targetGroup.id, {
                             document: { url: tempFilePath },
-                            fileName: fileName,
+                            fileName: realFileName,
                             mimetype: response.headers['content-type'] || 'application/octet-stream',
                             caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
                         });
 
-                        // 🗑️ යවා අවසන් වූ වහාම සර්වර් එකේ ඉඩ ඉතිරි කරගැනීමට ෆයිල් එක මැකීම
+                        // 🗑️ යවා අවසන් වූ වහාම සර්වර් එකෙන් තාවකාලික ෆයිල් එක මැකීම
                         if (fs.existsSync(tempFilePath)) {
                             fs.unlinkSync(tempFilePath);
                         }
 
                     } catch (err) {
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි (Link ${i+1}): ${err.message}` });
-                        // දෝෂයක් ආවත් ඉතුරු වෙන තාවකාලික ෆයිල් මැකීම
                         if (tempFilePath && fs.existsSync(tempFilePath)) {
                             fs.unlinkSync(tempFilePath);
                         }
