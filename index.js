@@ -6,18 +6,24 @@ const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
 
-// Railway / Koyeb Environment Session Handler
+// 🔐 METHOD 1: AUTOMATIC SESSION HANDLER FROM RAILWAY VARIABLES
 if (process.env.SESSION_ID) {
     if (!fs.existsSync('./session')) {
         fs.mkdirSync('./session');
     }
     try {
+        // Base64 කේතයක් නම් එය සාමාන්‍ය Text බවට පත් කර creds.json ලෙස ලියයි
         const decryptedCreds = Buffer.from(process.env.SESSION_ID, 'base64').toString('utf-8');
         JSON.parse(decryptedCreds); 
         fs.writeFileSync('./session/creds.json', decryptedCreds);
+        console.log("✅ SESSION_ID සාර්ථකව පද්ධතියට ඇතුළත් කරන ලදී!");
     } catch (e) {
+        // Base64 නොවී සෘජුවම JSON Text එකක් නම් එය එලෙසම ලියයි
         fs.writeFileSync('./session/creds.json', process.env.SESSION_ID);
+        console.log("✅ SESSION_ID (Raw JSON) සාර්ථකව ඇතුළත් කරන ලදී!");
     }
+} else {
+    console.log("⚠️ අවධානයට: Railway Variables තුළ SESSION_ID එකක් හමුනොවිය!");
 }
 
 // Temporary Folder Storage
@@ -29,7 +35,6 @@ if (!fs.existsSync(tempFolder)) {
 // 🕵️ ADVANCED DEEP SCRAPER: FITGIRL -> PASTE SITE -> FUCKINGFAST DIRECT LINKS
 async function getFuckingFastLinks(gameName) {
     try {
-        // 1. FitGirl සයිට් එක සර්ච් කිරීම
         const searchUrl = `https://fitgirl-repacks.site/?s=${encodeURIComponent(gameName)}`;
         const searchResponse = await axios.get(searchUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -39,9 +44,8 @@ async function getFuckingFastLinks(gameName) {
         const firstGameUrl = $('.entry-title a').first().attr('href');
         const firstGameTitle = $('.entry-title a').first().text().trim();
 
-        if (!firstGameUrl) return `❌ '${gameName}' nමින් ගේම් එකක් සොයාගත නොහැකි විය.`;
+        if (!firstGameUrl) return `❌ '${gameName}' නමින් ගේම් එකක් සොයාගත නොහැකි විය.`;
 
-        // 2. ගේම් පිටුවට ගොස් FuckingFast Paste ලින්ක් එක සෙවීම
         const gamePageResponse = await axios.get(firstGameUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
@@ -69,7 +73,6 @@ async function getFuckingFastLinks(gameName) {
 
         if (!pasteUrl) return `❌ '${firstGameTitle}' සඳහා FuckingFast ලින්ක් එකක් පිටුවේ හමුනොවිය.`;
 
-        // 3. Paste සයිට් එකෙන් FuckingFast Parts ලින්ක්ස් ටික ඇදගැනීම
         const pasteResponse = await axios.get(pasteUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
@@ -85,7 +88,6 @@ async function getFuckingFastLinks(gameName) {
 
         if (ffmiralLinks.length === 0) return `❌ Paste පද්ධතිය තුළ FuckingFast ලින්ක්ස් කිසිවක් හමුනොවිය.`;
 
-        // 4. හැම FuckingFast පේජ් එකකටම ගැඹුරින් රික්වෙස්ට් යවා සැබෑ Direct Link එක සොයාගැනීම
         let report = `🎮 *Game:* ${firstGameTitle}\n`;
         report += `📦 *Total Parts Found:* ${ffmiralLinks.length}\n\n`;
         report += `🔗 *FUCKINGFAST DIRECT DOWNLOAD LINKS:*\n───────────────────\n`;
@@ -135,7 +137,7 @@ async function startBot() {
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false,
+        printQRInTerminal: false, // 👈 ක්‍රමයට 1 ට අනුව QR අවශ්‍ය නොවන බැවින් False කර ඇත.
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
