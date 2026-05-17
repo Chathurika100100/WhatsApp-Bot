@@ -109,7 +109,7 @@ async function startBot() {
             return;
         }
 
-        // 3. FILE DOWNLOAD & FORWARD (.sg) - 🌟 LIVE PROGRESS BAR සමඟ
+        // 3. FILE DOWNLOAD & FORWARD (.sg) - 🌟 DOWNLOAD & UPLOAD PROGRESS BARS
         if (text.startsWith('.sg ')) {
             const commandBody = text.slice(4).trim();
             
@@ -144,7 +144,6 @@ async function startBot() {
                     let tempFilePath = '';
                     
                     try {
-                        // මුලින්ම සාමාන්‍ය නමක් දමා පසුව Header වලින් නියම නම සොයයි
                         let realFileName = `file_${Date.now()}.bin`;
                         try {
                             const parsedUrl = new URL(link);
@@ -164,7 +163,6 @@ async function startBot() {
                             timeout: 0
                         });
 
-                        // Content-Disposition වලින් නියම නම ලබා ගැනීම
                         const contentDisposition = response.headers['content-disposition'];
                         if (contentDisposition) {
                             const fileNameMatch = contentDisposition.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i);
@@ -182,7 +180,7 @@ async function startBot() {
                         const localSafeName = `temp_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
                         tempFilePath = path.join(tempFolder, localSafeName);
 
-                        // 📊 Progress Bar එක සඳහා මූලික මැසේජ් එක යැවීම
+                        // 📊 1. DOWNLOAD PROGRESS BAR
                         const initialText = `📥 *Downloading:* ${realFileName}\n📊 ▱▱▱▱▱▱▱▱▱▱ 0.0%\n📦 0.0MB / Calculating...`;
                         const progressMsg = await sock.sendMessage(from, { text: initialText });
                         const msgKey = progressMsg.key;
@@ -191,12 +189,10 @@ async function startBot() {
                         let downloadedBytes = 0;
                         let lastUpdateTime = Date.now();
 
-                        // 🔄 ඩවුන්ලෝඩ් වන අතරතුර මැසේජ් එක Live Update කිරීම
                         response.data.on('data', async (chunk) => {
                             downloadedBytes += chunk.length;
                             const now = Date.now();
 
-                            // තත්පර 2.5කට වරක් පමණක් මැසේජ් එක අප්ඩේට් කරයි (Rate Limit වැළැක්වීමට)
                             if (now - lastUpdateTime > 2500) {
                                 lastUpdateTime = now;
                                 const percentage = totalBytes ? ((downloadedBytes / totalBytes) * 100).toFixed(1) : 0;
@@ -226,21 +222,56 @@ async function startBot() {
                             writer.on('error', reject);
                         });
 
-                        // 100% නිම වූ පසු අවසන් Progress මැසේජ් එක පෙන්වීම
-                        const finalDownloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
-                        const finalProgressText = `📥 *Downloading:* ${realFileName}\n📊 ▰▰▰▰▰▰▰▰▰▰ 100.0%\n📦 ${finalDownloadedMB}MB / ${finalDownloadedMB}MB`;
+                        // ඩවුන්ලෝඩ් එක 100% ක් නිම වූ පසු පෙන්වීම
+                        const finalMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                        const finalDlText = `📥 *Downloading:* ${realFileName}\n📊 ▰▰▰▰▰▰▰▰▰▰ 100.0%\n📦 ${finalMB}MB / ${finalMB}MB`;
                         try {
-                            await sock.sendMessage(from, { text: finalProgressText, edit: msgKey });
+                            await sock.sendMessage(from, { text: finalDlText, edit: msgKey });
                         } catch (e) {}
 
-                        // 📤 ගෲප් එකට ෆයිල් එක අප්ලෝඩ් කිරීම
-                        await sock.sendMessage(targetGroup.id, {
-                            document: { url: tempFilePath },
-                            fileName: realFileName,
-                            mimetype: response.headers['content-type'] || 'application/octet-stream',
-                            caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
-                        });
 
+                        // 📊 2. UPLOAD PROGRESS BAR (SMART SIMULATION)
+                        let uploadPercentage = 0;
+                        let uploadInterval = setInterval(async () => {
+                            if (uploadPercentage < 95) {
+                                // ටිකෙන් ටික බාර් එක පිරවීමේ වේගය පාලනය කිරීම
+                                uploadPercentage += Math.floor(Math.random() * 8) + 4; 
+                                if (uploadPercentage > 95) uploadPercentage = 95;
+
+                                const uploadedMB = ((uploadPercentage / 100) * finalMB).toFixed(1);
+                                const filledBlocks = Math.round((uploadPercentage / 100) * 10);
+                                const emptyBlocks = 10 - filledBlocks;
+                                const progressBar = '▰'.repeat(filledBlocks) + '▱'.repeat(emptyBlocks);
+
+                                const uploadText = `📤 *Uploading:* ${realFileName}\n` +
+                                                     `📊 ${progressBar} ${uploadPercentage.toFixed(1)}%\n` +
+                                                     `📦 ${uploadedMB}MB / ${finalMB}MB`;
+                                try {
+                                    await sock.sendMessage(from, { text: uploadText, edit: msgKey });
+                                } catch (e) {}
+                            }
+                        }, 2500);
+
+                        // ගෲප් එකට සැබෑ ලෙසම ෆයිල් එක අප්ලෝඩ් කිරීම ආරම්භය
+                        try {
+                            await sock.sendMessage(targetGroup.id, {
+                                document: { url: tempFilePath },
+                                fileName: realFileName,
+                                mimetype: response.headers['content-type'] || 'application/octet-stream',
+                                caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
+                            });
+                        } finally {
+                            // අප්ලෝඩ් එක ඉවර වුණු වහාම හෝ දෝෂයක් ආවොත් ඉන්ටර්වල් එක නතර කිරීම
+                            clearInterval(uploadInterval);
+                        }
+
+                        // අප්ලෝඩ් එක 100% ක් සාර්ථක වූ පසු පෙන්වීම
+                        const finalUlText = `📤 *Uploading:* ${realFileName}\n📊 ▰▰▰▰▰▰▰▰▰▰ 100.0%\n📦 ${finalMB}MB / ${finalMB}MB`;
+                        try {
+                            await sock.sendMessage(from, { text: finalUlText, edit: msgKey });
+                        } catch (e) {}
+
+                        // තාවකාලික ෆයිල් මැකීම
                         if (fs.existsSync(tempFilePath)) {
                             fs.unlinkSync(tempFilePath);
                         }
@@ -267,7 +298,7 @@ async function startBot() {
                                     `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
 
                 await sock.sendMessage(targetGroup.id, { text: doneMessage });
-                await sock.sendMessage(from, { text: `✅ සියලුම ගොනු සහ සාරාංශය (Summary) '${targetGroup.subject}' සමූහයට සාර්ථකව යවන ලදී!` }, { quoted: msg });
+                await sock.sendMessage(from, { text: `✅ සියලුම ගොනු සහ සාරාංශය (Summary) '${targetGroup.subject}' සමූහයට සාර්ථකව යවන ลදී!` }, { quoted: msg });
 
             } catch (error) {
                 await sock.sendMessage(from, { text: `❌ පද්ධති දෝෂයකි: ${error.message}` }, { quoted: msg });
