@@ -26,7 +26,7 @@ if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// 🕵️ FITGIRL TO FUCKINGFAST LINK EXTRACTOR FUNCTION
+// 🕵️ ADVANCED DEEP SCRAPER: FITGIRL -> PASTE SITE -> FUCKINGFAST DIRECT LINKS
 async function getFuckingFastLinks(gameName) {
     try {
         // 1. FitGirl සයිට් එක සර්ච් කිරීම
@@ -39,7 +39,7 @@ async function getFuckingFastLinks(gameName) {
         const firstGameUrl = $('.entry-title a').first().attr('href');
         const firstGameTitle = $('.entry-title a').first().text().trim();
 
-        if (!firstGameUrl) return `❌ '${gameName}' නමින් ගේම් එකක් සොයාගත නොහැකි විය.`;
+        if (!firstGameUrl) return `❌ '${gameName}' nමින් ගේම් එකක් සොයාගත නොහැකි විය.`;
 
         // 2. ගේම් පිටුවට ගොස් FuckingFast Paste ලින්ක් එක සෙවීම
         const gamePageResponse = await axios.get(firstGameUrl, {
@@ -85,14 +85,40 @@ async function getFuckingFastLinks(gameName) {
 
         if (ffmiralLinks.length === 0) return `❌ Paste පද්ධතිය තුළ FuckingFast ලින්ක්ස් කිසිවක් හමුනොවිය.`;
 
-        // 4. මැසේජ් රිපෝට් එක සකස් කිරීම
+        // 4. හැම FuckingFast පේජ් එකකටම ගැඹුරින් රික්වෙස්ට් යවා සැබෑ Direct Link එක සොයාගැනීම
         let report = `🎮 *Game:* ${firstGameTitle}\n`;
         report += `📦 *Total Parts Found:* ${ffmiralLinks.length}\n\n`;
-        report += `🔗 *FUCKINGFAST DOWNLOAD LINKS (500MB PARTS):*\n───────────────────\n`;
+        report += `🔗 *FUCKINGFAST DIRECT DOWNLOAD LINKS:*\n───────────────────\n`;
 
         for (let i = 0; i < ffmiralLinks.length; i++) {
+            const partUrl = ffmiralLinks[i];
             const partNum = String(i + 1).padStart(3, '0');
-            report += `🔹 *Part ${partNum}:* ${ffmiralLinks[i]}\n`;
+            
+            try {
+                const ffPageResponse = await axios.get(partUrl, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                });
+                const $ff = cheerio.load(ffPageResponse.data);
+                
+                let directDlLink = $ff('a.btn-download').attr('href') || $ff('#download-btn').attr('href') || $ff('a[href*="/dl/"]').attr('href');
+                
+                if (!directDlLink) {
+                    $ff('a').each((j, el) => {
+                        const href = $ff(el).attr('href');
+                        if (href && (href.includes('/download/') || href.includes('/dl/') || href.includes('storage.'))) {
+                            directDlLink = href;
+                        }
+                    });
+                }
+
+                if (directDlLink) {
+                    report += `🔹 *Part ${partNum}:* ${directDlLink}\n`;
+                } else {
+                    report += `🔹 *Part ${partNum} (Page):* ${partUrl}\n`;
+                }
+            } catch (e) {
+                report += `🔹 *Part ${partNum} (Page):* ${partUrl}\n`;
+            }
         }
 
         return report;
@@ -120,7 +146,6 @@ async function startBot() {
         if (connection === 'close') {
             const statusCode = lastDisconnect.error?.output?.statusCode || lastDisconnect.error?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            console.log(`සම්බන්ධතාවය බිඳ වැටුණා. නැවත උත්සාහ කරයි...`, shouldReconnect);
             if (shouldReconnect) setTimeout(() => startBot(), 5000);
         } else if (connection === 'open') {
             console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා!');
@@ -134,7 +159,7 @@ async function startBot() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         const from = msg.key.remoteJid;
 
-        // 1. MENU COMMAND (.menu)
+        // MENU COMMAND (.menu)
         if (text === '.menu') {
             const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n` +
                              `👋 ආයුබෝවන්! මෙන්න මගේ විධානයන් (Commands) ලැයිස්තුව:\n\n` +
@@ -152,7 +177,7 @@ async function startBot() {
             return;
         }
 
-        // 2. SPEED TEST COMMAND (.speed)
+        // SPEED TEST COMMAND (.speed)
         if (text === '.speed') {
             await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී, කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
             try {
@@ -184,7 +209,7 @@ async function startBot() {
             return;
         }
 
-        // 3. FILE DOWNLOAD & FORWARD TO GROUP (.sg)
+        // FILE DOWNLOAD & FORWARD TO GROUP (.sg)
         if (text.startsWith('.sg ')) {
             const commandBody = text.slice(4).trim();
             const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -252,7 +277,6 @@ async function startBot() {
 
                         const finalMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
                         
-                        // Upload simulation
                         let uploadPercentage = 0;
                         let uploadInterval = setInterval(async () => {
                             if (uploadPercentage < 95) {
@@ -280,10 +304,10 @@ async function startBot() {
             }
         }
 
-        // 4. FILE DOWNLOAD & SEND TO INBOX (.si) - 🔒 INBOX ONLY
+        // FILE DOWNLOAD & SEND TO INBOX (.si) - 🔒 INBOX ONLY
         if (text.startsWith('.si ')) {
             if (from.endsWith('@g.us')) {
-                await sock.sendMessage(from, { text: '❌ *මෙම විධානය සමූහ (Group) තුළ භාවිතා කළ නොහැක!*\n\nකරුණාකර බොට්ගේ Inbox (Private Chat) එකට පැමිණ විධානය භාවිතා කරන්න.' }, { quoted: msg });
+                await sock.sendMessage(from, { text: '❌ *මෙම විධානය සමූහ (Group) තුළ භාවිතා කළ නොහැක!*\n\nInbox පැමිණෙන්න.' }, { quoted: msg });
                 return;
             }
 
@@ -362,7 +386,7 @@ async function startBot() {
             }
         }
 
-        // 5. FITGIRL GROUP COMMAND (.sgfg)
+        // FITGIRL GROUP COMMAND (.sgfg)
         if (text.startsWith('.sgfg ')) {
             const commandBody = text.slice(6).trim();
             const parts = commandBody.split(' ');
@@ -374,7 +398,7 @@ async function startBot() {
                 return;
             }
 
-            await sock.sendMessage(from, { text: `🔍 FitGirl වෙතින් '${gameNameInput}' සොයමින් පවතී...` }, { quoted: msg });
+            await sock.sendMessage(from, { text: `🔍 FitGirl & FuckingFast හරහා '${gameNameInput}' ගැඹුරින් පරීක්ෂා කරමින් පවතී. (මේ සඳහා විනාඩියක් පමණ ගත විය හැක)...` }, { quoted: msg });
 
             try {
                 const getGroups = await sock.groupFetchAllParticipating();
@@ -390,13 +414,13 @@ async function startBot() {
                 const finalMsg = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n   🎮 *𝙵𝙸𝚃𝙶𝙸𝚁𝙻 𝚇 𝙵𝚄𝙲𝙺𝙸𝙽𝙶𝙵𝙰𝚂𝚃* 🎮\n┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n${scrapeResult}\n\n_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
                 
                 await sock.sendMessage(targetGroup.id, { text: finalMsg });
-                await sock.sendMessage(from, { text: `✅ සියලුම Parts ලින්ක්ස් '${targetGroup.subject}' සමූහයට සාර්ථකව යවන ලදී!` }, { quoted: msg });
+                await sock.sendMessage(from, { text: `✅ සියලුම Direct Parts ලින්ක්ස් '${targetGroup.subject}' සමූහයට සාර්ථකව යවන ලදී!` }, { quoted: msg });
             } catch (error) {
                 await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${error.message}` }, { quoted: msg });
             }
         }
 
-        // 6. FITGIRL INBOX COMMAND (.sifg) - 🔒 INBOX ONLY
+        // FITGIRL INBOX COMMAND (.sifg) - 🔒 INBOX ONLY
         if (text.startsWith('.sifg ')) {
             if (from.endsWith('@g.us')) {
                 await sock.sendMessage(from, { text: '❌ *මෙම විධානය සමූහ (Group) තුළ භාවිතා කළ නොහැක!*\n\nකරුණාකර බොට්ගේ Inbox එකට පැමිණ මෙම විධානය භාවිතා කරන්න.' }, { quoted: msg });
@@ -409,7 +433,7 @@ async function startBot() {
                 return;
             }
 
-            await sock.sendMessage(from, { text: `🔍 FitGirl වෙතින් '${gameNameInput}' සොයමින් පවතී...` }, { quoted: msg });
+            await sock.sendMessage(from, { text: `🔍 FitGirl & FuckingFast හරහා '${gameNameInput}' ගැඹුරින් පරීක්ෂා කරමින් පවතී. කරුණාකර රැඳී සිටින්න...` }, { quoted: msg });
 
             const scrapeResult = await getFuckingFastLinks(gameNameInput);
             const finalMsg = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n   🎮 *𝙵𝙸𝚃𝙶𝙸𝚁𝙻 𝚇 𝙵𝚄𝙲𝙺𝙸𝙽𝙶𝙵𝙰𝚂𝚃* 🎮\n┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n${scrapeResult}\n\n_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
