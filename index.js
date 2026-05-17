@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
 
-// 🔐 METHOD 1: AUTOMATIC SESSION HANDLER FROM RAILWAY VARIABLES
+// 🔐 AUTOMATIC SESSION HANDLER FROM RAILWAY VARIABLES
 if (process.env.SESSION_ID) {
     if (!fs.existsSync('./session')) {
         fs.mkdirSync('./session');
@@ -84,7 +84,7 @@ async function searchFitGirl(query) {
     }
 }
 
-// 🎯 FUCKINGFAST FILTER FUNCTION
+// 🎯 EXTRACT RAW FUCKINGFAST LINKS
 async function getFitGirlLinks(pageUrl) {
     try {
         const response = await axios.get(pageUrl, {
@@ -97,10 +97,8 @@ async function getFitGirlLinks(pageUrl) {
             const text = $(el).text().trim();
             const link = $(el).find('a').attr('href');
             
-            // FuckingFast ලින්ක්ස් පමණක් තෝරා ගැනීම
             if (link && (link.includes('fuckingfast') || text.includes('FuckingFast') || text.includes('Fucking Fast'))) {
-                let cleanText = text.replace('Click to show direct links', '').trim();
-                mirrors.push(`🚀 *${cleanText}*:\n${link}`);
+                mirrors.push(link);
             }
         });
         return mirrors;
@@ -124,11 +122,10 @@ async function startBot() {
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const statusCode = lastDisconnect.error?.output?.statusCode || lastDisconnect.error?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) {
+            if (statusCode !== DisconnectReason.loggedOut) {
                 setTimeout(() => startBot(), 5000);
             }
         } else if (connection === 'open') {
@@ -153,58 +150,69 @@ async function startBot() {
             const args = trimmedText.slice(1).trim().split(/ +/);
             const command = args.shift().toLowerCase();
 
-            // 🛑 STEP 1: FITGIRL SEARCH (.fitgirl gta v)
-            if (command === 'fitgirl') {
-                const query = args.join(' ').trim();
-                if (!query) return await sock.sendMessage(from, { text: '❌ භාවිතය: .fitgirl [Game Name]' }, { quoted: msg });
-
-                await sock.sendMessage(from, { text: `🔍 *${query}* සර්ච් කරමින් පවතී...` }, { quoted: msg });
-                const results = await searchFitGirl(query);
-                
-                if (results.length === 0) return await sock.sendMessage(from, { text: '❌ කිසිදු ගේම් එකක් හමු නොවිය.' }, { quoted: msg });
-
-                userSessions[from] = results; 
-                let responseText = `🎮 *Search Results:* _${query}_\n\n`;
-                results.forEach((res, index) => { responseText += `*${index + 1}.* ${res.title}\n`; });
-                responseText += `\n👉 ලින්ක්ස් සඳහා: *.fgparts <number>* (උදා: .fgparts 1)`;
-                
-                await sock.sendMessage(from, { text: responseText }, { quoted: msg });
+            // 📄 MENU COMMAND
+            if (command === 'menu') {
+                const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n` +
+                                 `⚙️ *ප්‍රධාන විධානයන්:*\n` +
+                                 `👉 📄 \`.menu\` - මෙනුව ලබා ගැනීමට.\n` +
+                                 `👉 ⚡ \`.speed\` - සර්වර් වේගය බැලීමට.\n` +
+                                 `👉 📥 \`.sg [GroupName] [Link]\` - ෆයිල් එක Group එකට යැවීමට.\n` +
+                                 `👉 📥 \`.si [Link]\` - ෆයිල් එක Inbox ලබා ගැනීමට.\n\n` +
+                                 `🎮 *𝙵𝙸𝚃𝙶𝙸𝚁𝙻 𝙲𝙾𝙼𝙼𝙰𝙽𝙳𝚂:*\n` +
+                                 `👉 🔍 \`.fitgirl [GameName]\` - ගේම් සර්ච් කිරීමට.\n` +
+                                 `👉 📦 \`.fgparts [Number]\` - කෙලින්ම සියලුම Parts මෙම චැට් එකටම ඩවුන්ලෝඩ් කර ගැනීමට.\n\n` +
+                                 `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
+                                 
+                await sock.sendMessage(from, { text: menuText }, { quoted: msg });
                 return;
             }
 
-            // 🛑 STEP 2: GET ONLY FUCKINGFAST LINKS (.fgparts 1)
-            if (command === 'fgparts') {
-                const index = parseInt(args[0]) - 1;
-                if (!userSessions[from] || isNaN(index) || !userSessions[from][index]) {
-                    return await sock.sendMessage(from, { text: '❌ කරුණාකර මුලින්ම .fitgirl සර්ච් කරන්න.' }, { quoted: msg });
+            // ⚡ SPEED TEST COMMAND
+            if (command === 'speed') {
+                await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
+                try {
+                    const pingStart = performance.now();
+                    await axios.get('https://www.google.com');
+                    const ping = (performance.now() - pingStart).toFixed(0);
+
+                    const dlStart = performance.now();
+                    await axios.get('https://speed.cloudflare.com/__down?bytes=1048576', { responseType: 'arraybuffer' });
+                    const dlTime = (performance.now() - dlStart) / 1000; 
+                    const downloadSpeed = ((1 / dlTime) * 8).toFixed(2); 
+
+                    const speedResult = `⚡ *𝚂𝙴𝚁𝚅𝙴𝚁 𝚂𝙿𝙴𝙴𝙳 𝚃𝙴𝚂𝚃 𝚁𝙴𝚂𝚄𝙻𝚃𝚂*\n\n` +
+                                        `🔹 *Ping:* ${ping} ms\n` +
+                                        `🔹 *Download Speed:* ${downloadSpeed} Mbps\n\n` +
+                                        `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
+
+                    await sock.sendMessage(from, { text: speedResult }, { quoted: msg });
+                } catch (err) {
+                    await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${err.message}` }, { quoted: msg });
                 }
-
-                const selectedGame = userSessions[from][index];
-                await sock.sendMessage(from, { text: `⏳ *FuckingFast* ලින්ක්ස් සොයමින් පවතී...` }, { quoted: msg });
-                const links = await getFitGirlLinks(selectedGame.link);
-                
-                if (links.length === 0) return await sock.sendMessage(from, { text: '❌ මෙම ගේම් එක සඳහා FuckingFast ලින්ක්ස් හමු නොවිය.' }, { quoted: msg });
-
-                let responseText = `🚀 *FUCKINGFAST LINKS FOR:* ${selectedGame.title}\n\n` + links.join('\n\n');
-                await sock.sendMessage(from, { text: responseText }, { quoted: msg });
                 return;
             }
 
-            // 📥 DOWNLOAD TO GROUP (.sg GroupName Link)
+            // 📥 DOWNLOAD AND SEND TO GROUP (.sg GroupName Link)
             if (command === 'sg') {
                 const fullBody = args.join(' ');
                 const urlRegex = /(https?:\/\/[^\s]+)/g;
                 const links = fullBody.match(urlRegex) || [];
                 let groupNameInput = fullBody.replace(urlRegex, '').trim().replace(/[\[\]]/g, '').trim();
 
-                if (!groupNameInput || links.length === 0) return await sock.sendMessage(from, { text: '❌ භාවිතය: .sg [Group Name] [Link]' }, { quoted: msg });
+                if (!groupNameInput || links.length === 0) {
+                    await sock.sendMessage(from, { text: '❌ භාවිතය: .sg [Group Name] [Link]' }, { quoted: msg });
+                    return;
+                }
 
                 const getGroups = await sock.groupFetchAllParticipating();
                 const targetGroup = Object.values(getGroups).find(g => g.subject.toLowerCase().trim() === groupNameInput.toLowerCase());
 
-                if (!targetGroup) return await sock.sendMessage(from, { text: `❌ '${groupNameInput}' සමූහය සොයාගත නොහැක!` }, { quoted: msg });
+                if (!targetGroup) {
+                    await sock.sendMessage(from, { text: `❌ '${groupNameInput}' සමූහය සොයාගත නොහැක!` }, { quoted: msg });
+                    return;
+                }
 
-                await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක ආරම්භ විය...` }, { quoted: msg });
+                await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක සූදානම් කරමින් පවතී...` }, { quoted: msg });
 
                 for (let i = 0; i < links.length; i++) {
                     let tempFilePath = '';
@@ -225,14 +233,13 @@ async function startBot() {
                         response.data.pipe(writer);
                         await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
 
-                        // GROUP එකට යවන කොටස (කැප්ෂන් නැත, ෆයිල් එක පමණි)
                         await sock.sendMessage(targetGroup.id, { 
                             document: { url: tempFilePath }, 
                             fileName: realFileName, 
                             mimetype: response.headers['content-type'] || 'application/octet-stream' 
                         });
                         
-                        await sock.sendMessage(from, { text: `✅ ෆයිල් එක ගෘප් එකට යැව්වා!` });
+                        await sock.sendMessage(from, { text: `✅ ෆයිල් එක ${groupNameInput} ගෘප් එකට යැව්වා!` });
                     } catch (e) {
                         await sock.sendMessage(from, { text: `❌ Error: ${e.message}` });
                     } finally {
@@ -241,12 +248,18 @@ async function startBot() {
                 }
             }
 
-            // 🔐 DOWNLOAD TO INBOX (.si Link)
+            // 🔐 DOWNLOAD AND SEND TO INBOX (.si Link)
             if (command === 'si') {
-                if (from.endsWith('@g.us')) return await sock.sendMessage(from, { text: '❌ මෙය Inbox එකේ පමණක් ක්‍රියා කරයි!' }, { quoted: msg });
+                if (from.endsWith('@g.us')) {
+                    await sock.sendMessage(from, { text: '❌ මෙම විධානය Inbox හි පමණක් ක්‍රියා කරයි!' }, { quoted: msg });
+                    return;
+                }
 
                 const links = args.join(' ').match(/(https?:\/\/[^\s]+)/g) || [];
-                if (links.length === 0) return await sock.sendMessage(from, { text: '❌ භාවිතය: .si [Link]' }, { quoted: msg });
+                if (links.length === 0) {
+                    await sock.sendMessage(from, { text: '❌ භාවිතය: .si [Link]' }, { quoted: msg });
+                    return;
+                }
 
                 await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක ආරම්භ විය...` }, { quoted: msg });
 
@@ -269,7 +282,6 @@ async function startBot() {
                         response.data.pipe(writer);
                         await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
 
-                        // INBOX එකට යවන කොටස (කැප්ෂන් නැත, ෆයිල් එක පමණි)
                         await sock.sendMessage(from, { 
                             document: { url: tempFilePath }, 
                             fileName: realFileName, 
@@ -281,6 +293,76 @@ async function startBot() {
                         if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                     }
                 }
+            }
+
+            // 🛑 STEP 1: FITGIRL SEARCH (.fitgirl gta v)
+            if (command === 'fitgirl') {
+                const query = args.join(' ').trim();
+                if (!query) return await sock.sendMessage(from, { text: '❌ භාවිතය: .fitgirl [Game Name]' }, { quoted: msg });
+
+                await sock.sendMessage(from, { text: `🔍 *${query}* සර්ච් කරමින් පවතී...` }, { quoted: msg });
+                const results = await searchFitGirl(query);
+                
+                if (results.length === 0) return await sock.sendMessage(from, { text: '❌ කිසිදු ගේම් එකක් හමු නොවිය.' }, { quoted: msg });
+
+                userSessions[from] = results; 
+                let responseText = `🎮 *Search Results:* _${query}_\n\n`;
+                results.forEach((res, index) => { responseText += `*${index + 1}.* ${res.title}\n`; });
+                responseText += `\n👉 සියලුම Parts කෙලින්ම මෙතනටම ගෙන්න ගන්න: \n*.fgparts <number>* (උදා: .fgparts 1)`;
+                
+                await sock.sendMessage(from, { text: responseText }, { quoted: msg });
+                return;
+            }
+
+            // 🛑 STEP 2: AUTOMATIC DOWNLOAD & SEND ALL PARTS DIRECTLY (.fgparts 1)
+            if (command === 'fgparts') {
+                const index = parseInt(args[0]) - 1;
+                if (!userSessions[from] || isNaN(index) || !userSessions[from][index]) {
+                    return await sock.sendMessage(from, { text: '❌ කරුණාකර මුලින්ම .fitgirl සර්ච් කරන්න.' }, { quoted: msg });
+                }
+
+                const selectedGame = userSessions[from][index];
+                await sock.sendMessage(from, { text: `⏳ *${selectedGame.title}* හි FuckingFast ලින්ක්ස් පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
+                
+                const links = await getFitGirlLinks(selectedGame.link);
+                if (links.length === 0) return await sock.sendMessage(from, { text: '❌ මෙම ගේම් එක සඳහා FuckingFast ලින්ක්ස් හමු නොවිය.' }, { quoted: msg });
+
+                await sock.sendMessage(from, { text: `📦 මුළු ෆයිල්ස් (Parts) ප්‍රමාණය: ${links.length}\n📥 සියල්ලම ස්වයංක්‍රීයව ඩවුන්ලෝඩ් වී මෙම චැට් එකටම ලැබීම ආරම්භ විය...` }, { quoted: msg });
+
+                for (let i = 0; i < links.length; i++) {
+                    let tempFilePath = '';
+                    try {
+                        const finalUrl = await resolveDirectLink(links[i]);
+                        let realFileName = `part_${i + 1}_${Date.now()}.bin`;
+                        
+                        const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 0 });
+                        
+                        const cd = response.headers['content-disposition'];
+                        if (cd) {
+                            const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i) || cd.match(/filename=["']?([^"'\n;]+)["']?/i);
+                            if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
+                        }
+
+                        tempFilePath = path.join(tempFolder, `temp_auto_${Date.now()}_${i}`);
+                        const writer = fs.createWriteStream(tempFilePath);
+                        response.data.pipe(writer);
+                        await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
+
+                        await sock.sendMessage(from, { 
+                            document: { url: tempFilePath }, 
+                            fileName: realFileName, 
+                            mimetype: response.headers['content-type'] || 'application/octet-stream' 
+                        });
+
+                    } catch (e) {
+                        await sock.sendMessage(from, { text: `❌ Part ${i + 1} ඩවුන්ලෝඩ් කිරීමේදී දෝෂයක් ඇතිවිය: ${e.message}` });
+                    } finally {
+                        if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+                    }
+                }
+
+                await sock.sendMessage(from, { text: `✅ *${selectedGame.title}* හි සියලුම ෆයිල්ස් එවා අවසන්!` });
+                return;
             }
 
         } catch (globalErr) {
