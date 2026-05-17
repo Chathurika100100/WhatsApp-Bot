@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
-  {
+  },
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
     "axios": "^1.6.0",
