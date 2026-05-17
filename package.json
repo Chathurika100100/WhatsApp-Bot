@@ -1,13 +1,13 @@
 {
   "name": "whatsapp-bot",
   "version": "1.0.0",
-  "description": "WhatsApp Bot for RV Games",
+  "description": "WhatsApp Remote Downloader Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
+    "@whiskeysockets/baileys": "^6.7.9",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
     "pino": "^8.16.0"
