@@ -82,7 +82,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
     const response = await axios({ 
         method: 'get', 
         url: finalUrl, 
-        responseType: 'stream', // THIS IS CRITICAL
+        responseType: 'stream', 
         timeout: 120000 
     });
     
@@ -148,7 +148,7 @@ async function startBot() {
         auth: state,
         printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false, // Prevents loading massive old chats into RAM
+        syncFullHistory: false, 
         shouldSyncHistoryMessage: () => false, 
         downloadHistoryWithFullResponse: false, 
         generateHighQualityLinkPreview: false,
@@ -171,7 +171,7 @@ async function startBot() {
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return; // Ignore chat appends/history syncs
+        if (type !== 'notify') return; 
         
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
