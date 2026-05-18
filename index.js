@@ -30,7 +30,7 @@ if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON (Using Built-in URLSearchParams)
+// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
@@ -89,6 +89,59 @@ async function resolveDirectLink(url) {
     return url;
 }
 
+// ⏳ LIVE PROGRESS DOWNLOADER HELPER (Prevents OOM Crashes)
+async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
+    const finalUrl = await resolveDirectLink(url);
+    const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 0 });
+    
+    let realFileName = `file_${Date.now()}.bin`;
+    const cd = response.headers['content-disposition'];
+    if (cd) {
+        const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i) || cd.match(/filename=["']?([^"'\n;]+)["']?/i);
+        if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
+    }
+    const mimetype = response.headers['content-type'] || 'application/octet-stream';
+
+    const totalBytes = parseInt(response.headers['content-length'], 10) || 0;
+    let downloadedBytes = 0;
+    
+    const progressMsg = await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක සූදානම් කරමින් පවතී...` }, { quoted: quotedMsg });
+    
+    const writer = fs.createWriteStream(outputPath);
+    response.data.pipe(writer);
+    
+    let lastUpdate = Date.now();
+    response.data.on('data', (chunk) => {
+        downloadedBytes += chunk.length;
+        const now = Date.now();
+        // Updates every 2.5 seconds to avoid WhatsApp rate limits
+        if (now - lastUpdate > 2500 && totalBytes > 0) {
+            lastUpdate = now;
+            const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
+            const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+            const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+            const filled = Math.min(10, Math.round((downloadedBytes / totalBytes) * 10));
+            const bar = '■'.repeat(filled) + '□'.repeat(10 - filled);
+            
+            sock.sendMessage(from, { 
+                text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`,
+                edit: progressMsg.key 
+            }).catch(() => {});
+        }
+    });
+
+    await new Promise((resolve, reject) => {
+        writer.on('finish', () => {
+            sock.sendMessage(from, { text: `✅ ඩවුන්ලෝඩ් එක සාර්ථකයි! දැන් WhatsApp වෙත අප්ලෝඩ් වෙමින් පවතී...`, edit: progressMsg.key }).catch(() => {});
+            resolve();
+        });
+        writer.on('error', reject);
+        response.data.on('error', reject);
+    });
+
+    return { realFileName, mimetype };
+}
+
 // MAIN BOT FUNCTION
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
@@ -145,7 +198,7 @@ async function startBot() {
                 return;
             }
 
-            // ⚡ SPEED TEST COMMAND
+            // ⚡ SPEED TEST COMMAND (With Upload Speed Restored)
             if (command === 'speed') {
                 await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
                 try {
@@ -153,14 +206,25 @@ async function startBot() {
                     await axios.get('https://www.google.com');
                     const ping = (performance.now() - pingStart).toFixed(0);
 
+                    // Download test
                     const dlStart = performance.now();
                     await axios.get('https://speed.cloudflare.com/__down?bytes=1048576', { responseType: 'arraybuffer' });
                     const dlTime = (performance.now() - dlStart) / 1000; 
                     const downloadSpeed = ((1 / dlTime) * 8).toFixed(2); 
 
+                    // Upload test
+                    const ulStart = performance.now();
+                    const dummyBuffer = Buffer.alloc(1024 * 1024); // 1MB Dummy Data
+                    await axios.post('https://httpbin.org/post', dummyBuffer, {
+                        headers: { 'Content-Type': 'application/octet-stream' }
+                    });
+                    const ulTime = (performance.now() - ulStart) / 1000;
+                    const uploadSpeed = ((1 / ulTime) * 8).toFixed(2);
+
                     const speedResult = `⚡ *𝚂𝙴𝚁𝚅𝙴𝚁 𝚂𝙿𝙴𝙴𝙳 𝚃𝙴𝚂𝚃 𝚁𝙴𝚂𝚄𝙻𝚃𝚂*\n\n` +
                                         `🔹 *Ping:* ${ping} ms\n` +
-                                        `🔹 *Download Speed:* ${downloadSpeed} Mbps\n\n` +
+                                        `🔹 *Download Speed:* ${downloadSpeed} Mbps\n` +
+                                        `🔹 *Upload Speed:* ${uploadSpeed} Mbps\n\n` +
                                         `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
 
                     await sock.sendMessage(from, { text: speedResult }, { quoted: msg });
@@ -190,38 +254,22 @@ async function startBot() {
                     return;
                 }
 
-                await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක සූදානම් කරමින් පවතී...` }, { quoted: msg });
-
                 for (let i = 0; i < links.length; i++) {
-                    let tempFilePath = '';
+                    let tempFilePath = path.join(tempFolder, `temp_sg_${Date.now()}_${i}`);
                     try {
-                        const finalUrl = await resolveDirectLink(links[i]);
-                        let realFileName = `file_${Date.now()}.bin`;
+                        const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
                         
-                        const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 0 });
-                        
-                        const cd = response.headers['content-disposition'];
-                        if (cd) {
-                            const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i) || cd.match(/filename=["']?([^"'\n;]+)["']?/i);
-                            if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
-                        }
-
-                        tempFilePath = path.join(tempFolder, `temp_${Date.now()}_${i}`);
-                        const writer = fs.createWriteStream(tempFilePath);
-                        response.data.pipe(writer);
-                        await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
-
                         await sock.sendMessage(targetGroup.id, { 
                             document: { url: tempFilePath }, 
-                            fileName: realFileName, 
-                            mimetype: response.headers['content-type'] || 'application/octet-stream' 
+                            fileName: fileInfo.realFileName, 
+                            mimetype: fileInfo.mimetype 
                         });
                         
-                        await sock.sendMessage(from, { text: `✅ ෆයිල් එක ${groupNameInput} ගෘප් එකට යැව්වා!` });
+                        await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව ${groupNameInput} ගෘප් එකට යැව්වා!` });
                     } catch (e) {
                         await sock.sendMessage(from, { text: `❌ Error: ${e.message}` });
                     } finally {
-                        if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+                        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                     }
                 }
             }
@@ -239,36 +287,20 @@ async function startBot() {
                     return;
                 }
 
-                await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක ආරම්භ විය...` }, { quoted: msg });
-
-                for (let link of links) {
-                    let tempFilePath = '';
+                for (let i = 0; i < links.length; i++) {
+                    let tempFilePath = path.join(tempFolder, `temp_si_${Date.now()}_${i}`);
                     try {
-                        const finalUrl = await resolveDirectLink(link);
-                        let realFileName = `file_${Date.now()}.bin`;
-
-                        const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 0 });
-                        
-                        const cd = response.headers['content-disposition'];
-                        if (cd) {
-                            const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i) || cd.match(/filename=["']?([^"'\n;]+)["']?/i);
-                            if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
-                        }
-
-                        tempFilePath = path.join(tempFolder, `temp_inbox_${Date.now()}`);
-                        const writer = fs.createWriteStream(tempFilePath);
-                        response.data.pipe(writer);
-                        await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
+                        const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
 
                         await sock.sendMessage(from, { 
                             document: { url: tempFilePath }, 
-                            fileName: realFileName, 
-                            mimetype: response.headers['content-type'] || 'application/octet-stream' 
+                            fileName: fileInfo.realFileName, 
+                            mimetype: fileInfo.mimetype 
                         });
                     } catch (e) {
                         await sock.sendMessage(from, { text: `❌ Error: ${e.message}` });
                     } finally {
-                        if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+                        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                     }
                 }
             }
