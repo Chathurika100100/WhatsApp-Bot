@@ -5,9 +5,9 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
-const { Transform } = require('stream'); // 🚀 STREAMS PREVENTING RAM OVERFLOW
+const { Transform } = require('stream');
 
-// 🔐 AUTOMATIC SESSION HANDLER FROM RAILWAY VARIABLES
+// 🔐 AUTOMATIC SESSION HANDLER
 if (process.env.SESSION_ID) {
     if (!fs.existsSync('./session')) {
         fs.mkdirSync('./session');
@@ -21,8 +21,6 @@ if (process.env.SESSION_ID) {
         fs.writeFileSync('./session/creds.json', process.env.SESSION_ID);
         console.log("✅ SESSION_ID (Raw JSON) සාර්ථකව ඇතුළත් කරන ලදී!");
     }
-} else {
-    console.log("⚠️ අවධානයට: Railway Variables තුළ SESSION_ID එකක් හමුනොවිය!");
 }
 
 // Temporary Folder Storage
@@ -31,15 +29,15 @@ if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON
+// 🔗 BYPASS FUCKINGFAST DOWNLOAD BUTTON (NO 'QS' MODULE NEEDED)
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
         try {
             const res = await axios.get(cleanUrl, {
                 headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
                 timeout: 30000
             });
@@ -55,6 +53,7 @@ async function resolveDirectLink(url) {
                     formAction = cleanUrl;
                 }
 
+                // Built-in URLSearchParams API handles form encoding natively
                 let formData = new URLSearchParams();
                 form.find('input').each((i, input) => {
                     const name = $(input).attr('name');
@@ -73,9 +72,7 @@ async function resolveDirectLink(url) {
                     },
                     maxRedirects: 0,
                     timeout: 30000,
-                    validateStatus: function (status) {
-                        return status >= 200 && status < 400; 
-                    }
+                    validateStatus: (status) => status >= 200 && status < 400
                 });
 
                 const directLink = postRes.headers['location'] || postRes.config.url;
@@ -90,7 +87,6 @@ async function resolveDirectLink(url) {
             if (e.response && e.response.headers && e.response.headers['location']) {
                 return e.response.headers['location'];
             }
-            console.error("🚫 FuckingFast Bypass Error:", e.message);
             return url;
         }
     }
@@ -124,7 +120,6 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
     let downloadedBytes = 0;
     let lastUpdate = Date.now();
 
-    // 🛠️ PURE TRANSFORM STREAM FOR ULTRA-LOW RAM DISK WRITING
     const progressTracker = new Transform({
         transform(chunk, encoding, callback) {
             downloadedBytes += chunk.length;
@@ -139,7 +134,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
                 const bar = '■'.repeat(filled) + '□'.repeat(10 - filled);
                 
                 sock.sendMessage(from, { 
-                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_安排 𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`,
+                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`,
                     edit: progressMsg.key 
                 }).catch(() => {});
             }
@@ -148,7 +143,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         }
     });
 
-    const writer = fs.createWriteStream(outputPath, { highWaterMark: 1024 * 64 }); // 64KB Strictly chunks
+    const writer = fs.createWriteStream(outputPath, { highWaterMark: 1024 * 64 }); // High Backpressure optimization
 
     await new Promise((resolve, reject) => {
         response.data.pipe(progressTracker).pipe(writer);
@@ -173,11 +168,9 @@ async function startBot() {
         auth: state,
         printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false, 
-        shouldSyncHistoryMessage: () => false, 
-        getMessage: async (key) => {
-            return { conversation: '' }; 
-        }
+        syncFullHistory: false, // Core low-RAM fix
+        shouldSyncHistoryMessage: () => false, // Do not parse old chats
+        getMessage: async (key) => { return { conversation: '' }; }
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -194,8 +187,11 @@ async function startBot() {
         }
     });
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
+    // CRITICAL FIX: Ignore type 'append' (History synchronization events)
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
         try {
+            if (type !== 'notify') return; // Skip history updates entirely to save 100s of MBs of RAM
+            
             const msg = messages[0];
             if (!msg.message || msg.key.fromMe) return;
 
@@ -220,7 +216,6 @@ async function startBot() {
                                  `👉 📥 \`.sg [GroupName] [Link]\` - ෆයිල් එක Group එකට යැවීමට.\n` +
                                  `👉 📥 \`.si [Link]\` - ෆයිල් එක Inbox ලබා ගැනීමට.\n\n` +
                                  `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
-                                 
                 await sock.sendMessage(from, { text: menuText }, { quoted: msg });
                 return;
             }
@@ -238,21 +233,10 @@ async function startBot() {
                     const dlTime = (performance.now() - dlStart) / 1000; 
                     const downloadSpeed = ((1 / dlTime) * 8).toFixed(2); 
 
-                    const ulStart = performance.now();
-                    const dummyBuffer = Buffer.alloc(1024 * 1024);
-                    await axios.post('https://httpbin.org/post', dummyBuffer, {
-                        headers: { 'Content-Type': 'application/octet-stream' },
-                        timeout: 15000
-                    });
-                    const ulTime = (performance.now() - ulStart) / 1000;
-                    const uploadSpeed = ((1 / ulTime) * 8).toFixed(2);
-
                     const speedResult = `⚡ *𝚂𝙴𝚁𝚅𝙴𝚁 𝚂𝙿𝙴𝙴𝙳 𝚃𝙴𝚂𝚃 𝚁𝙴𝚂𝚄𝙻𝚃𝚂*\n\n` +
                                         `🔹 *Ping:* ${ping} ms\n` +
-                                        `🔹 *Download Speed:* ${downloadSpeed} Mbps\n` +
-                                        `🔹 *Upload Speed:* ${uploadSpeed} Mbps\n\n` +
+                                        `🔹 *Download Speed:* ${downloadSpeed} Mbps\n\n` +
                                         `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
-
                     await sock.sendMessage(from, { text: speedResult }, { quoted: msg });
                 } catch (err) {
                     await sock.sendMessage(from, { text: `❌ වේගය මැනීමේ දෝෂයකි: ${err.message}` }, { quoted: msg });
@@ -260,7 +244,7 @@ async function startBot() {
                 return;
             }
 
-            // 📥 DOWNLOAD AND SEND TO GROUP (.sg GroupName Link)
+            // 📥 DOWNLOAD AND SEND TO GROUP
             if (command === 'sg') {
                 const fullBody = args.join(' ');
                 const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -294,10 +278,9 @@ async function startBot() {
                         });
                         
                         if (activeProgressKey) {
-                            await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව ${groupNameInput} සමූහයට යවන ලදී!`, edit: activeProgressKey });
+                            await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව යවන ලදී!`, edit: activeProgressKey });
                         }
                     } catch (e) {
-                        console.error(e);
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
                     } finally {
                         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
@@ -305,7 +288,7 @@ async function startBot() {
                 }
             }
 
-            // 🔐 DOWNLOAD AND SEND TO INBOX (.si Link)
+            // 🔐 DOWNLOAD AND SEND TO INBOX
             if (command === 'si') {
                 if (from.endsWith('@g.us')) {
                     await sock.sendMessage(from, { text: '❌ මෙම විධානය Inbox හි පමණක් ක්‍රියා කරයි!' }, { quoted: msg });
@@ -335,7 +318,6 @@ async function startBot() {
                             await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව Inbox වෙත එවන ලදී!`, edit: activeProgressKey });
                         }
                     } catch (e) {
-                        console.error(e);
                         await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
                     } finally {
                         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
