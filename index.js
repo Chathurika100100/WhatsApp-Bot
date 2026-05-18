@@ -29,7 +29,7 @@ if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// 🔗 BYPASS FUCKINGFAST DOWNLOAD BUTTON (NO 'QS' MODULE NEEDED)
+// 🔗 BYPASS FUCKINGFAST DOWNLOAD BUTTON
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
@@ -53,7 +53,6 @@ async function resolveDirectLink(url) {
                     formAction = cleanUrl;
                 }
 
-                // Built-in URLSearchParams API handles form encoding natively
                 let formData = new URLSearchParams();
                 form.find('input').each((i, input) => {
                     const name = $(input).attr('name');
@@ -93,7 +92,7 @@ async function resolveDirectLink(url) {
     return url;
 }
 
-// ⏳ LIVE PROGRESS DOWNLOADER WITH HIGH-BACKPRESSURE DISK PIPING
+// ⏳ LIVE PROGRESS DOWNLOADER
 async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
     const finalUrl = await resolveDirectLink(url);
     
@@ -143,7 +142,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         }
     });
 
-    const writer = fs.createWriteStream(outputPath, { highWaterMark: 1024 * 64 }); // High Backpressure optimization
+    const writer = fs.createWriteStream(outputPath, { highWaterMark: 1024 * 64 });
 
     await new Promise((resolve, reject) => {
         response.data.pipe(progressTracker).pipe(writer);
@@ -168,8 +167,10 @@ async function startBot() {
         auth: state,
         printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false, // Core low-RAM fix
-        shouldSyncHistoryMessage: () => false, // Do not parse old chats
+        syncFullHistory: false, 
+        shouldSyncHistoryMessage: () => false, 
+        downloadHistoryWithFullResponse: false, // Core RAM Optimization
+        generateHighQualityLinkPreview: false, // Ultra RAM Optimization
         getMessage: async (key) => { return { conversation: '' }; }
     });
 
@@ -187,10 +188,10 @@ async function startBot() {
         }
     });
 
-    // CRITICAL FIX: Ignore type 'append' (History synchronization events)
+    // Ignore History events completely
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         try {
-            if (type !== 'notify') return; // Skip history updates entirely to save 100s of MBs of RAM
+            if (type !== 'notify') return; 
             
             const msg = messages[0];
             if (!msg.message || msg.key.fromMe) return;
