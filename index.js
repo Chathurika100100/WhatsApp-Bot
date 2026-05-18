@@ -5,6 +5,7 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
+const { Transform } = require('stream'); // 🚀 STREAMS PREVENTING RAM OVERFLOW
 
 // 🔐 AUTOMATIC SESSION HANDLER FROM RAILWAY VARIABLES
 if (process.env.SESSION_ID) {
@@ -30,7 +31,7 @@ if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON (FIXED 404 RELATIVE URLS)
+// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
@@ -96,7 +97,7 @@ async function resolveDirectLink(url) {
     return url;
 }
 
-// ⏳ LIVE PROGRESS DOWNLOADER HELPER
+// ⏳ LIVE PROGRESS DOWNLOADER WITH HIGH-BACKPRESSURE DISK PIPING
 async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
     const finalUrl = await resolveDirectLink(url);
     
@@ -104,7 +105,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         method: 'get', 
         url: finalUrl, 
         responseType: 'stream', 
-        timeout: 60000,
+        timeout: 90000,
         maxContentLength: Infinity,
         maxBodyLength: Infinity
     });
@@ -116,41 +117,48 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
     }
     const mimetype = response.headers['content-type'] || 'application/octet-stream';
-
     const totalBytes = parseInt(response.headers['content-length'], 10) || 0;
-    let downloadedBytes = 0;
     
     const progressMsg = await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක සූදානම් කරමින් පවතී...` }, { quoted: quotedMsg });
     
-    const writer = fs.createWriteStream(outputPath);
-    response.data.pipe(writer);
-    
+    let downloadedBytes = 0;
     let lastUpdate = Date.now();
-    response.data.on('data', (chunk) => {
-        downloadedBytes += chunk.length;
-        const now = Date.now();
-        if (now - lastUpdate > 3000 && totalBytes > 0) {
-            lastUpdate = now;
-            const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
-            const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
-            const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
-            const filled = Math.min(10, Math.round((downloadedBytes / totalBytes) * 10));
-            const bar = '■'.repeat(filled) + '□'.repeat(10 - filled);
+
+    // 🛠️ PURE TRANSFORM STREAM FOR ULTRA-LOW RAM DISK WRITING
+    const progressTracker = new Transform({
+        transform(chunk, encoding, callback) {
+            downloadedBytes += chunk.length;
+            const now = Date.now();
             
-            sock.sendMessage(from, { 
-                text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`,
-                edit: progressMsg.key 
-            }).catch(() => {});
+            if (now - lastUpdate > 4000 && totalBytes > 0) {
+                lastUpdate = now;
+                const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
+                const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+                const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                const filled = Math.min(10, Math.round((downloadedBytes / totalBytes) * 10));
+                const bar = '■'.repeat(filled) + '□'.repeat(10 - filled);
+                
+                sock.sendMessage(from, { 
+                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_安排 𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`,
+                    edit: progressMsg.key 
+                }).catch(() => {});
+            }
+            this.push(chunk);
+            callback();
         }
     });
 
+    const writer = fs.createWriteStream(outputPath, { highWaterMark: 1024 * 64 }); // 64KB Strictly chunks
+
     await new Promise((resolve, reject) => {
+        response.data.pipe(progressTracker).pipe(writer);
         writer.on('finish', () => {
             sock.sendMessage(from, { text: `✅ ඩවුන්ලෝඩ් එක සාර්ථකයි! දැන් WhatsApp වෙත අප්ලෝඩ් වෙමින් පවතී...`, edit: progressMsg.key }).catch(() => {});
             resolve();
         });
         writer.on('error', reject);
         response.data.on('error', reject);
+        progressTracker.on('error', reject);
     });
 
     return { realFileName, mimetype, progressKey: progressMsg.key };
@@ -160,16 +168,15 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
 
-    // 🚀 RAILWAY LOW-RAM PERFORMANCE CONFIGURATION
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false, // Disables full history sync
-        shouldSyncHistoryMessage: () => false, // STRICTLY BLOCKS HISTORY TO PREVENT "KILLED" OOM CRASHES
+        syncFullHistory: false, 
+        shouldSyncHistoryMessage: () => false, 
         getMessage: async (key) => {
-            return { conversation: '' }; // Minimizes message cache footprint
+            return { conversation: '' }; 
         }
     });
 
