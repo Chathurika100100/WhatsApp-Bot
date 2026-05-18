@@ -7,7 +7,7 @@ const path = require('path');
 const { performance } = require('perf_hooks');
 const { Transform } = require('stream');
 
-// 🔐 SESSION INITIALIZER (FORCE RE-WRITE TO FIX CACHE)
+// 🔐 SESSION INITIALIZER
 const sessionPath = './session';
 if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath);
 
@@ -19,7 +19,7 @@ if (process.env.SESSION_ID) {
         } else {
             decryptedCreds = Buffer.from(process.env.SESSION_ID, 'base64').toString('utf-8');
         }
-        JSON.parse(decryptedCreds); // Validate JSON
+        JSON.parse(decryptedCreds); 
         fs.writeFileSync(path.join(sessionPath, 'creds.json'), decryptedCreds);
         console.log("✅ SESSION_ID සාර්ථකව පද්ධතියට ඇතුළත් කරන ලදී!");
     } catch (e) {
@@ -28,9 +28,11 @@ if (process.env.SESSION_ID) {
     }
 }
 
-// 📂 Temporary Folder Storage (DISK USE)
-const tempFolder = './temp_downloads';
-if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder);
+// 📂 FIX: RAILWAY WRITE PERMISSION FIX (USING OS TMP FOLDER)
+const tempFolder = '/tmp/temp_downloads'; 
+if (!fs.existsSync(tempFolder)) {
+    fs.mkdirSync(tempFolder, { recursive: true });
+}
 
 // 🔗 BYPASS DIRECT LINK EXTRACTOR
 async function resolveDirectLink(url) {
@@ -76,7 +78,7 @@ async function resolveDirectLink(url) {
     return url;
 }
 
-// ⏳ LIVE PROGRESS DOWNLOADER
+// ⏳ LIVE PROGRESS DOWNLOADER (DISK BUFFERED STREAM)
 async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
     const finalUrl = await resolveDirectLink(url);
     const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 120000 });
@@ -154,11 +156,9 @@ async function startBot() {
                 console.log('🔄 Reconnecting Bot...');
                 await delay(5000);
                 startBot();
-            } else {
-                console.log('❌ Session Logged Out! Please update SESSION_ID.');
             }
         } else if (connection === 'open') {
-            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා! බොට් දැන් විධානයන් ලබාගැනීමට සූදානම්.');
+            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා!');
         }
     });
 
@@ -167,7 +167,6 @@ async function startBot() {
         const msg = messages[0];
         if (!msg.message) return;
 
-        // 🔍 ULTRA-STABLE MESSAGE TEXT EXTRACTOR
         const messageContent = msg.message.ephemeralMessage?.message || msg.message.viewOnceMessage?.message || msg.message;
         let text = messageContent.conversation || 
                    messageContent.extendedTextMessage?.text || 
@@ -175,17 +174,17 @@ async function startBot() {
                    messageContent.videoMessage?.caption || '';
 
         text = text.trim();
-        if (!text.startsWith('.')) return; // Check for prefix
+        if (!text.startsWith('.')) return;
 
         const from = msg.key.remoteJid;
         const args = text.slice(1).split(/ +/);
         const command = args.shift().toLowerCase();
 
-        console.log(`💬 Received Command: .${command} from: ${from}`); // This will log on Railway console when you type!
+        console.log(`💬 Command Received: .${command}`);
 
         // 📄 MENU COMMAND
         if (command === 'menu') {
-            const menuText = `🤖 *參 𝚉𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n⚙️ *ප්‍රධාන විධානයන්:*\n👉 📄 \`.menu\`\n👉 ⚡ \`.speed\`\n👉 📥 \`.sg [Group Name] [Link]\`\n👉 📥 \`.si [Link]\``;
+            const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n⚙️ *ප්‍රධාන විධානයන්:*\n👉 📄 \`.menu\`\n👉 ⚡ \`.speed\`\n👉 📥 \`.sg [Group Name] [Link]\`\n👉 📥 \`.si [Link]\``;
             await sock.sendMessage(from, { text: menuText }, { quoted: msg });
         }
 
@@ -228,6 +227,7 @@ async function startBot() {
                     const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
                     progressKey = fileInfo.progressKey;
                     
+                    // Safe stream upload straight from write-allowed /tmp
                     await sock.sendMessage(targetJid, { 
                         document: fs.createReadStream(tempFilePath), 
                         fileName: fileInfo.realFileName, 
