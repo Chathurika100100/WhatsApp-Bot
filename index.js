@@ -7,10 +7,16 @@ const path = require('path');
 const { performance } = require('perf_hooks');
 const { Transform } = require('stream');
 
-// 🔐 SESSION INITIALIZER
-const sessionPath = './session';
-if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath);
+// 📂 DISK USE OPTIMIZATION: MOVING ALL PATHS TO ALLOWED /tmp DIRECTORY
+const baseTmpPath = '/tmp/whatsapp_bot_data';
+const sessionPath = path.join(baseTmpPath, 'session');
+const tempFolder = path.join(baseTmpPath, 'temp_downloads');
 
+// Ensure directories exist in /tmp to bypass Railway Read-Only restrictions
+if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
+if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder, { recursive: true });
+
+// 🔐 SESSION INITIALIZER (WRITING TO ALLOWED /tmp STORAGE TO PREVENT ENOENT/EROFS)
 if (process.env.SESSION_ID) {
     try {
         let decryptedCreds = '';
@@ -21,20 +27,14 @@ if (process.env.SESSION_ID) {
         }
         JSON.parse(decryptedCreds); 
         fs.writeFileSync(path.join(sessionPath, 'creds.json'), decryptedCreds);
-        console.log("✅ SESSION_ID සාර්ථකව පද්ධතියට ඇතුළත් කරන ලදී!");
+        console.log("✅ SESSION_ID සාර්ථකව /tmp පද්ධතියට ඇතුළත් කරන ලදී!");
     } catch (e) {
         fs.writeFileSync(path.join(sessionPath, 'creds.json'), process.env.SESSION_ID);
-        console.log("✅ SESSION_ID (Raw JSON) සාර්ථකව ඇතුළත් කරන ලදී!");
+        console.log("✅ SESSION_ID (Raw JSON) සාර්ථකව /tmp පද්ධතියට ඇතුළත් කරන ලදී!");
     }
 }
 
-// 📂 FIX: RAILWAY WRITE PERMISSION FIX (USING OS TMP FOLDER)
-const tempFolder = '/tmp/temp_downloads'; 
-if (!fs.existsSync(tempFolder)) {
-    fs.mkdirSync(tempFolder, { recursive: true });
-}
-
-// 🔗 BYPASS DIRECT LINK EXTRACTOR
+// 🔗 BYPASS DIRECT LINK EXTRACTOR (Fuckingfast & Direct link support)
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
@@ -78,9 +78,11 @@ async function resolveDirectLink(url) {
     return url;
 }
 
-// ⏳ LIVE PROGRESS DOWNLOADER (DISK BUFFERED STREAM)
+// ⏳ LIVE PROGRESS DOWNLOADER (STREAMING ENTIRELY TO DISK TO KEEP RAM LOW)
 async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
     const finalUrl = await resolveDirectLink(url);
+    
+    // Request as stream so it doesn't load the file into memory/RAM
     const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 120000 });
     
     let realFileName = `file_${Date.now()}.bin`;
@@ -101,6 +103,8 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         transform(chunk, encoding, callback) {
             downloadedBytes += chunk.length;
             const now = Date.now();
+            
+            // Updates every 5 seconds to minimize network overload
             if (now - lastUpdate > 5000 && totalBytes > 0) {
                 lastUpdate = now;
                 const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
@@ -110,7 +114,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
                 const bar = '■'.repeat(filled) + '□'.repeat(10 - filled);
                 
                 sock.sendMessage(from, { 
-                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 RV Games_`,
+                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`,
                     edit: progressMsg.key 
                 }).catch(() => {});
             }
@@ -133,7 +137,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
     return { realFileName, mimetype, progressKey: progressMsg.key };
 }
 
-// 🤖 MAIN BOT FUNCTION
+// 🤖 MAIN BOT APPLICATION
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
@@ -142,7 +146,7 @@ async function startBot() {
         auth: state,
         printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false,
+        syncFullHistory: false, // Disables heavy history syncs to prevent memory crashes
         shouldSyncHistoryMessage: () => false
     });
 
@@ -158,7 +162,7 @@ async function startBot() {
                 startBot();
             }
         } else if (connection === 'open') {
-            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා!');
+            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා! බොට් දැන් සූදානම්.');
         }
     });
 
@@ -167,6 +171,7 @@ async function startBot() {
         const msg = messages[0];
         if (!msg.message) return;
 
+        // Stable text extractor from any source (Inbox, Groups, Self)
         const messageContent = msg.message.ephemeralMessage?.message || msg.message.viewOnceMessage?.message || msg.message;
         let text = messageContent.conversation || 
                    messageContent.extendedTextMessage?.text || 
@@ -180,7 +185,7 @@ async function startBot() {
         const args = text.slice(1).split(/ +/);
         const command = args.shift().toLowerCase();
 
-        console.log(`💬 Command Received: .${command}`);
+        console.log(`💬 Command Received: .${command} from ${from}`);
 
         // 📄 MENU COMMAND
         if (command === 'menu') {
@@ -188,7 +193,7 @@ async function startBot() {
             await sock.sendMessage(from, { text: menuText }, { quoted: msg });
         }
 
-        // ⚡ SPEED TEST
+        // ⚡ SPEED TEST COMMAND
         if (command === 'speed') {
             await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
             try {
@@ -201,7 +206,7 @@ async function startBot() {
             }
         }
 
-        // 📥 GROUP & INBOX DOWNLOAD
+        // 📥 REMOTE DOWNLOAD COMMANDS (.sg & .si)
         if (command === 'sg' || command === 'si') {
             const fullBody = args.join(' ');
             const links = fullBody.match(/(https?:\/\/[^\s]+)/g) || [];
@@ -224,10 +229,11 @@ async function startBot() {
                 let progressKey = null;
 
                 try {
+                    // Downloads safely to Disk Storage
                     const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
                     progressKey = fileInfo.progressKey;
                     
-                    // Safe stream upload straight from write-allowed /tmp
+                    // Streams directly out of Disk storage to save RAM usage
                     await sock.sendMessage(targetJid, { 
                         document: fs.createReadStream(tempFilePath), 
                         fileName: fileInfo.realFileName, 
@@ -240,6 +246,7 @@ async function startBot() {
                 } catch (e) {
                     await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
                 } finally {
+                    // Instantly wipe from disk storage to prevent hitting space limitations
                     if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                 }
             }
