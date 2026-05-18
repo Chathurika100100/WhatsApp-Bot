@@ -48,7 +48,6 @@ async function resolveDirectLink(url) {
             
             if (form.length > 0) {
                 let formAction = form.attr('action') || '';
-                // FIX: Convert relative paths (e.g. /dl/...) to absolute URLs to prevent 404 errors
                 if (formAction && !formAction.startsWith('http')) {
                     formAction = new URL(formAction, cleanUrl).href;
                 } else if (!formAction) {
@@ -97,7 +96,7 @@ async function resolveDirectLink(url) {
     return url;
 }
 
-// ⏳ LIVE PROGRESS DOWNLOADER HELPER (Stream Optimization to Prevent OOM Crashes)
+// ⏳ LIVE PROGRESS DOWNLOADER HELPER
 async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
     const finalUrl = await resolveDirectLink(url);
     
@@ -130,7 +129,6 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
     response.data.on('data', (chunk) => {
         downloadedBytes += chunk.length;
         const now = Date.now();
-        // Send status updates every 3 seconds to avoid spamming WhatsApp network
         if (now - lastUpdate > 3000 && totalBytes > 0) {
             lastUpdate = now;
             const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
@@ -162,11 +160,17 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
 
+    // 🚀 RAILWAY LOW-RAM PERFORMANCE CONFIGURATION
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        syncFullHistory: false, // Disables full history sync
+        shouldSyncHistoryMessage: () => false, // STRICTLY BLOCKS HISTORY TO PREVENT "KILLED" OOM CRASHES
+        getMessage: async (key) => {
+            return { conversation: '' }; // Minimizes message cache footprint
+        }
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -222,13 +226,11 @@ async function startBot() {
                     await axios.get('https://www.google.com', { timeout: 10000 });
                     const ping = (performance.now() - pingStart).toFixed(0);
 
-                    // Download test
                     const dlStart = performance.now();
                     await axios.get('https://speed.cloudflare.com/__down?bytes=1048576', { responseType: 'arraybuffer', timeout: 15000 });
                     const dlTime = (performance.now() - dlStart) / 1000; 
                     const downloadSpeed = ((1 / dlTime) * 8).toFixed(2); 
 
-                    // Upload test
                     const ulStart = performance.now();
                     const dummyBuffer = Buffer.alloc(1024 * 1024);
                     await axios.post('https://httpbin.org/post', dummyBuffer, {
@@ -278,7 +280,6 @@ async function startBot() {
                         const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
                         activeProgressKey = fileInfo.progressKey;
                         
-                        // FIX OOM: Pass a ReadStream instead of path URL string to ensure Baileys streams the file out of RAM
                         await sock.sendMessage(targetGroup.id, { 
                             document: fs.createReadStream(tempFilePath), 
                             fileName: fileInfo.realFileName, 
@@ -290,7 +291,7 @@ async function startBot() {
                         }
                     } catch (e) {
                         console.error(e);
-                        await sock.sendMessage(from, { text: `❌ බාගත කිරීමේ හෝ යැවීමේ දෝෂයකි: ${e.message}` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
                     } finally {
                         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                     }
@@ -317,7 +318,6 @@ async function startBot() {
                         const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
                         activeProgressKey = fileInfo.progressKey;
 
-                        // FIX OOM: Stream file from disk to network directly
                         await sock.sendMessage(from, { 
                             document: fs.createReadStream(tempFilePath), 
                             fileName: fileInfo.realFileName, 
@@ -329,7 +329,7 @@ async function startBot() {
                         }
                     } catch (e) {
                         console.error(e);
-                        await sock.sendMessage(from, { text: `❌ බාගත කිරීමේ දෝෂයකි: ${e.message}` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
                     } finally {
                         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                     }
