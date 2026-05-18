@@ -5,7 +5,6 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
-const qs = require('qs');
 
 // 🔐 AUTOMATIC SESSION HANDLER FROM RAILWAY VARIABLES
 if (process.env.SESSION_ID) {
@@ -31,7 +30,7 @@ if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON (Form Submitter)
+// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON (Using Built-in URLSearchParams)
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
@@ -48,17 +47,17 @@ async function resolveDirectLink(url) {
             
             if (form.length > 0) {
                 const formAction = form.attr('action') || cleanUrl;
-                let formData = {};
+                let formData = new URLSearchParams();
                 
                 form.find('input').each((i, input) => {
                     const name = $(input).attr('name');
                     const value = $(input).attr('value');
                     if (name) {
-                        formData[name] = value || '';
+                        formData.append(name, value || '');
                     }
                 });
 
-                const postRes = await axios.post(formAction, qs.stringify(formData), {
+                const postRes = await axios.post(formAction, formData.toString(), {
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
                         'Content-Type': 'application/x-www-form-urlencoded',
@@ -132,7 +131,7 @@ async function startBot() {
             const args = trimmedText.slice(1).trim().split(/ +/);
             const command = args.shift().toLowerCase();
 
-            // 📄 MENU COMMAND (FitGirl ඉවත් කරන ලදී)
+            // 📄 MENU COMMAND
             if (command === 'menu') {
                 const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n` +
                                  `⚙️ *ප්‍රධාන විධානයන්:*\n` +
