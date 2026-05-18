@@ -23,21 +23,21 @@ if (process.env.SESSION_ID) {
     }
 }
 
-// Temporary Folder Storage
+// 📂 Temporary Folder Storage (DISK USE)
 const tempFolder = './temp_downloads';
 if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// 🔗 BYPASS FUCKINGFAST DOWNLOAD BUTTON
+// 🔗 BYPASS DIRECT LINK EXTRACTOR
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
         try {
             const res = await axios.get(cleanUrl, {
                 headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                    'Accept': 'text/html'
                 },
                 timeout: 30000
             });
@@ -46,69 +46,50 @@ async function resolveDirectLink(url) {
             const form = $('form');
             
             if (form.length > 0) {
-                let formAction = form.attr('action') || '';
-                if (formAction && !formAction.startsWith('http')) {
-                    formAction = new URL(formAction, cleanUrl).href;
-                } else if (!formAction) {
-                    formAction = cleanUrl;
-                }
+                let formAction = form.attr('action') || cleanUrl;
+                if (!formAction.startsWith('http')) formAction = new URL(formAction, cleanUrl).href;
 
                 let formData = new URLSearchParams();
                 form.find('input').each((i, input) => {
                     const name = $(input).attr('name');
-                    const value = $(input).attr('value');
-                    if (name) {
-                        formData.append(name, value || '');
-                    }
+                    if (name) formData.append(name, $(input).attr('value') || '');
                 });
 
                 const postRes = await axios.post(formAction, formData.toString(), {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'Referer': cleanUrl,
-                        'Origin': 'https://fuckingfast.co'
-                    },
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     maxRedirects: 0,
-                    timeout: 30000,
-                    validateStatus: (status) => status >= 200 && status < 400
+                    validateStatus: status => status >= 200 && status < 400
                 });
 
                 const directLink = postRes.headers['location'] || postRes.config.url;
-                if (directLink && directLink !== cleanUrl) {
-                    return directLink;
-                }
+                if (directLink && directLink !== cleanUrl) return directLink;
             }
 
-            let directLink = $('a.btn-download').attr('href') || $('#download-btn').attr('href');
-            return directLink || url;
+            return $('a.btn-download').attr('href') || $('#download-btn').attr('href') || url;
         } catch (e) {
-            if (e.response && e.response.headers && e.response.headers['location']) {
-                return e.response.headers['location'];
-            }
+            if (e.response?.headers?.location) return e.response.headers.location;
             return url;
         }
     }
     return url;
 }
 
-// ⏳ LIVE PROGRESS DOWNLOADER
+// ⏳ LIVE PROGRESS DOWNLOADER (STREAMING DIRECT TO DISK)
 async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
     const finalUrl = await resolveDirectLink(url);
     
+    // Request as STREAM to prevent RAM filling up
     const response = await axios({ 
         method: 'get', 
         url: finalUrl, 
-        responseType: 'stream', 
-        timeout: 90000,
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
+        responseType: 'stream', // THIS IS CRITICAL
+        timeout: 120000 
     });
     
     let realFileName = `file_${Date.now()}.bin`;
     const cd = response.headers['content-disposition'];
     if (cd) {
-        const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i) || cd.match(/filename=["']?([^"'\n;]+)["']?/i);
+        const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i);
         if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
     }
     const mimetype = response.headers['content-type'] || 'application/octet-stream';
@@ -124,16 +105,16 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
             downloadedBytes += chunk.length;
             const now = Date.now();
             
-            if (now - lastUpdate > 4000 && totalBytes > 0) {
+            if (now - lastUpdate > 5000 && totalBytes > 0) {
                 lastUpdate = now;
                 const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
                 const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
                 const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
-                const filled = Math.min(10, Math.round((downloadedBytes / totalBytes) * 10));
+                const filled = Math.round((downloadedBytes / totalBytes) * 10);
                 const bar = '■'.repeat(filled) + '□'.repeat(10 - filled);
                 
                 sock.sendMessage(from, { 
-                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`,
+                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 RV Games_`,
                     edit: progressMsg.key 
                 }).catch(() => {});
             }
@@ -142,7 +123,8 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         }
     });
 
-    const writer = fs.createWriteStream(outputPath, { highWaterMark: 1024 * 64 });
+    // Write straight to disk
+    const writer = fs.createWriteStream(outputPath);
 
     await new Promise((resolve, reject) => {
         response.data.pipe(progressTracker).pipe(writer);
@@ -152,13 +134,12 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         });
         writer.on('error', reject);
         response.data.on('error', reject);
-        progressTracker.on('error', reject);
     });
 
     return { realFileName, mimetype, progressKey: progressMsg.key };
 }
 
-// MAIN BOT FUNCTION
+// 🤖 MAIN BOT FUNCTION
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
 
@@ -167,11 +148,11 @@ async function startBot() {
         auth: state,
         printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false, 
+        syncFullHistory: false, // Prevents loading massive old chats into RAM
         shouldSyncHistoryMessage: () => false, 
-        downloadHistoryWithFullResponse: false, // Core RAM Optimization
-        generateHighQualityLinkPreview: false, // Ultra RAM Optimization
-        getMessage: async (key) => { return { conversation: '' }; }
+        downloadHistoryWithFullResponse: false, 
+        generateHighQualityLinkPreview: false,
+        getMessage: async () => { return { conversation: '' }; }
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -179,155 +160,92 @@ async function startBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            const statusCode = lastDisconnect.error?.output?.statusCode || lastDisconnect.error?.statusCode;
+            const statusCode = lastDisconnect.error?.output?.statusCode;
             if (statusCode !== DisconnectReason.loggedOut) {
-                setTimeout(() => startBot(), 5000);
+                console.log('🔄 Reconnecting...');
+                setTimeout(startBot, 5000);
             }
         } else if (connection === 'open') {
             console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා!');
         }
     });
 
-    // Ignore History events completely
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        try {
-            if (type !== 'notify') return; 
-            
-            const msg = messages[0];
-            if (!msg.message || msg.key.fromMe) return;
+        if (type !== 'notify') return; // Ignore chat appends/history syncs
+        
+        const msg = messages[0];
+        if (!msg.message || msg.key.fromMe) return;
 
-            const text = msg.message.conversation || 
-                         msg.message.extendedTextMessage?.text || 
-                         msg.message.imageMessage?.caption || '';
-            
-            const from = msg.key.remoteJid;
-            const trimmedText = text.trim();
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        const from = msg.key.remoteJid;
+        if (!text.trim().startsWith('.')) return;
 
-            if (!trimmedText.startsWith('.')) return;
+        const args = text.trim().slice(1).trim().split(/ +/);
+        const command = args.shift().toLowerCase();
 
-            const args = trimmedText.slice(1).trim().split(/ +/);
-            const command = args.shift().toLowerCase();
+        // 📄 MENU COMMAND
+        if (command === 'menu') {
+            const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n⚙️ *ප්‍රධාන විධානයන්:*\n👉 📄 \`.menu\`\n👉 ⚡ \`.speed\`\n👉 📥 \`.sg [Group] [Link]\`\n👉 📥 \`.si [Link]\``;
+            await sock.sendMessage(from, { text: menuText }, { quoted: msg });
+        }
 
-            // 📄 MENU COMMAND
-            if (command === 'menu') {
-                const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n` +
-                                 `⚙️ *ප්‍රධාන විධානයන්:*\n` +
-                                 `👉 📄 \`.menu\` - මෙනුව ලබා ගැනීමට.\n` +
-                                 `👉 ⚡ \`.speed\` - සර්වර් වේගය බැලීමට.\n` +
-                                 `👉 📥 \`.sg [GroupName] [Link]\` - ෆයිල් එක Group එකට යැවීමට.\n` +
-                                 `👉 📥 \`.si [Link]\` - ෆයිල් එක Inbox ලබා ගැනීමට.\n\n` +
-                                 `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
-                await sock.sendMessage(from, { text: menuText }, { quoted: msg });
-                return;
+        // ⚡ SPEED TEST
+        if (command === 'speed') {
+            await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
+            try {
+                const start = performance.now();
+                await axios.get('https://www.google.com', { timeout: 10000 });
+                const ping = (performance.now() - start).toFixed(0);
+                await sock.sendMessage(from, { text: `⚡ *Server Speed:*\n🔹 Ping: ${ping} ms` }, { quoted: msg });
+            } catch (err) {
+                await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${err.message}` }, { quoted: msg });
             }
+        }
 
-            // ⚡ SPEED TEST COMMAND
-            if (command === 'speed') {
-                await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
-                try {
-                    const pingStart = performance.now();
-                    await axios.get('https://www.google.com', { timeout: 10000 });
-                    const ping = (performance.now() - pingStart).toFixed(0);
+        // 📥 GROUP & INBOX DOWNLOAD
+        if (command === 'sg' || command === 'si') {
+            const fullBody = args.join(' ');
+            const links = fullBody.match(/(https?:\/\/[^\s]+)/g) || [];
+            
+            if (links.length === 0) return await sock.sendMessage(from, { text: `❌ භාවිතය: .${command} [Link]` }, { quoted: msg });
 
-                    const dlStart = performance.now();
-                    await axios.get('https://speed.cloudflare.com/__down?bytes=1048576', { responseType: 'arraybuffer', timeout: 15000 });
-                    const dlTime = (performance.now() - dlStart) / 1000; 
-                    const downloadSpeed = ((1 / dlTime) * 8).toFixed(2); 
-
-                    const speedResult = `⚡ *𝚂𝙴𝚁𝚅𝙴𝚁 𝚂𝙿𝙴𝙴𝙳 𝚃𝙴𝚂𝚃 𝚁𝙴𝚂𝚄𝙻𝚃𝚂*\n\n` +
-                                        `🔹 *Ping:* ${ping} ms\n` +
-                                        `🔹 *Download Speed:* ${downloadSpeed} Mbps\n\n` +
-                                        `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
-                    await sock.sendMessage(from, { text: speedResult }, { quoted: msg });
-                } catch (err) {
-                    await sock.sendMessage(from, { text: `❌ වේගය මැනීමේ දෝෂයකි: ${err.message}` }, { quoted: msg });
-                }
-                return;
-            }
-
-            // 📥 DOWNLOAD AND SEND TO GROUP
+            let targetJid = from;
             if (command === 'sg') {
-                const fullBody = args.join(' ');
-                const urlRegex = /(https?:\/\/[^\s]+)/g;
-                const links = fullBody.match(urlRegex) || [];
-                let groupNameInput = fullBody.replace(urlRegex, '').trim().replace(/[\[\]]/g, '').trim();
-
-                if (!groupNameInput || links.length === 0) {
-                    await sock.sendMessage(from, { text: '❌ භාවිතය: .sg [Group Name] [Link]' }, { quoted: msg });
-                    return;
-                }
-
-                const getGroups = await sock.groupFetchAllParticipating();
-                const targetGroup = Object.values(getGroups).find(g => g.subject.toLowerCase().trim() === groupNameInput.toLowerCase());
-
-                if (!targetGroup) {
-                    await sock.sendMessage(from, { text: `❌ '${groupNameInput}' සමූහය සොයාගත නොහැක!` }, { quoted: msg });
-                    return;
-                }
-
-                for (let i = 0; i < links.length; i++) {
-                    let tempFilePath = path.join(tempFolder, `temp_sg_${Date.now()}_${i}`);
-                    let activeProgressKey = null;
-                    try {
-                        const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
-                        activeProgressKey = fileInfo.progressKey;
-                        
-                        await sock.sendMessage(targetGroup.id, { 
-                            document: fs.createReadStream(tempFilePath), 
-                            fileName: fileInfo.realFileName, 
-                            mimetype: fileInfo.mimetype 
-                        });
-                        
-                        if (activeProgressKey) {
-                            await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව යවන ලදී!`, edit: activeProgressKey });
-                        }
-                    } catch (e) {
-                        await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
-                    } finally {
-                        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-                    }
-                }
+                const groupName = fullBody.replace(/(https?:\/\/[^\s]+)/g, '').replace(/[\[\]]/g, '').trim();
+                if (!groupName) return await sock.sendMessage(from, { text: '❌ සමූහයේ නම ඇතුළත් කරන්න.' }, { quoted: msg });
+                
+                const groups = await sock.groupFetchAllParticipating();
+                const targetGroup = Object.values(groups).find(g => g.subject.toLowerCase() === groupName.toLowerCase());
+                if (!targetGroup) return await sock.sendMessage(from, { text: `❌ '${groupName}' සමූහය සොයාගත නොහැක!` }, { quoted: msg });
+                targetJid = targetGroup.id;
+            } else if (from.endsWith('@g.us')) {
+                return await sock.sendMessage(from, { text: '❌ .si විධානය Inbox හි පමණක් ක්‍රියා කරයි!' }, { quoted: msg });
             }
 
-            // 🔐 DOWNLOAD AND SEND TO INBOX
-            if (command === 'si') {
-                if (from.endsWith('@g.us')) {
-                    await sock.sendMessage(from, { text: '❌ මෙම විධානය Inbox හි පමණක් ක්‍රියා කරයි!' }, { quoted: msg });
-                    return;
-                }
+            for (let i = 0; i < links.length; i++) {
+                const tempFilePath = path.join(tempFolder, `dl_${Date.now()}_${i}.bin`);
+                let progressKey = null;
 
-                const links = args.join(' ').match(/(https?:\/\/[^\s]+)/g) || [];
-                if (links.length === 0) {
-                    await sock.sendMessage(from, { text: '❌ භාවිතය: .si [Link]' }, { quoted: msg });
-                    return;
-                }
-
-                for (let i = 0; i < links.length; i++) {
-                    let tempFilePath = path.join(tempFolder, `temp_si_${Date.now()}_${i}`);
-                    let activeProgressKey = null;
-                    try {
-                        const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
-                        activeProgressKey = fileInfo.progressKey;
-
-                        await sock.sendMessage(from, { 
-                            document: fs.createReadStream(tempFilePath), 
-                            fileName: fileInfo.realFileName, 
-                            mimetype: fileInfo.mimetype 
-                        });
-                        
-                        if (activeProgressKey) {
-                            await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව Inbox වෙත එවන ලදී!`, edit: activeProgressKey });
-                        }
-                    } catch (e) {
-                        await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
-                    } finally {
-                        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+                try {
+                    const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
+                    progressKey = fileInfo.progressKey;
+                    
+                    // Upload using ReadStream straight from Disk
+                    await sock.sendMessage(targetJid, { 
+                        document: fs.createReadStream(tempFilePath), 
+                        fileName: fileInfo.realFileName, 
+                        mimetype: fileInfo.mimetype 
+                    });
+                    
+                    if (progressKey) {
+                        await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව යවන ලදී!`, edit: progressKey });
                     }
+                } catch (e) {
+                    await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
+                } finally {
+                    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); // Free up disk space immediately
                 }
             }
-
-        } catch (globalErr) {
-            console.error("Error in msg loop:", globalErr);
         }
     });
 }
