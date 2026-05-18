@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const axios = require('axios');
 const cheerio = require('cheerio');
@@ -7,27 +7,30 @@ const path = require('path');
 const { performance } = require('perf_hooks');
 const { Transform } = require('stream');
 
-// 🔐 AUTOMATIC SESSION HANDLER
+// 🔐 SESSION INITIALIZER (FORCE RE-WRITE TO FIX CACHE)
+const sessionPath = './session';
+if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath);
+
 if (process.env.SESSION_ID) {
-    if (!fs.existsSync('./session')) {
-        fs.mkdirSync('./session');
-    }
     try {
-        const decryptedCreds = Buffer.from(process.env.SESSION_ID, 'base64').toString('utf-8');
-        JSON.parse(decryptedCreds); 
-        fs.writeFileSync('./session/creds.json', decryptedCreds);
+        let decryptedCreds = '';
+        if (process.env.SESSION_ID.startsWith('node_')) {
+            decryptedCreds = Buffer.from(process.env.SESSION_ID.replace('node_', ''), 'base64').toString('utf-8');
+        } else {
+            decryptedCreds = Buffer.from(process.env.SESSION_ID, 'base64').toString('utf-8');
+        }
+        JSON.parse(decryptedCreds); // Validate JSON
+        fs.writeFileSync(path.join(sessionPath, 'creds.json'), decryptedCreds);
         console.log("✅ SESSION_ID සාර්ථකව පද්ධතියට ඇතුළත් කරන ලදී!");
     } catch (e) {
-        fs.writeFileSync('./session/creds.json', process.env.SESSION_ID);
+        fs.writeFileSync(path.join(sessionPath, 'creds.json'), process.env.SESSION_ID);
         console.log("✅ SESSION_ID (Raw JSON) සාර්ථකව ඇතුළත් කරන ලදී!");
     }
 }
 
 // 📂 Temporary Folder Storage (DISK USE)
 const tempFolder = './temp_downloads';
-if (!fs.existsSync(tempFolder)) {
-    fs.mkdirSync(tempFolder);
-}
+if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder);
 
 // 🔗 BYPASS DIRECT LINK EXTRACTOR
 async function resolveDirectLink(url) {
@@ -64,7 +67,6 @@ async function resolveDirectLink(url) {
                 const directLink = postRes.headers['location'] || postRes.config.url;
                 if (directLink && directLink !== cleanUrl) return directLink;
             }
-
             return $('a.btn-download').attr('href') || $('#download-btn').attr('href') || url;
         } catch (e) {
             if (e.response?.headers?.location) return e.response.headers.location;
@@ -74,17 +76,10 @@ async function resolveDirectLink(url) {
     return url;
 }
 
-// ⏳ LIVE PROGRESS DOWNLOADER (STREAMING DIRECT TO DISK)
+// ⏳ LIVE PROGRESS DOWNLOADER
 async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
     const finalUrl = await resolveDirectLink(url);
-    
-    // Request as STREAM to prevent RAM filling up
-    const response = await axios({ 
-        method: 'get', 
-        url: finalUrl, 
-        responseType: 'stream', 
-        timeout: 120000 
-    });
+    const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 120000 });
     
     let realFileName = `file_${Date.now()}.bin`;
     const cd = response.headers['content-disposition'];
@@ -104,7 +99,6 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         transform(chunk, encoding, callback) {
             downloadedBytes += chunk.length;
             const now = Date.now();
-            
             if (now - lastUpdate > 5000 && totalBytes > 0) {
                 lastUpdate = now;
                 const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
@@ -123,9 +117,7 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
         }
     });
 
-    // Write straight to disk
     const writer = fs.createWriteStream(outputPath);
-
     await new Promise((resolve, reject) => {
         response.data.pipe(progressTracker).pipe(writer);
         writer.on('finish', () => {
@@ -141,51 +133,59 @@ async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) 
 
 // 🤖 MAIN BOT FUNCTION
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('./session');
+    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false, 
-        shouldSyncHistoryMessage: () => false, 
-        downloadHistoryWithFullResponse: false, 
-        generateHighQualityLinkPreview: false,
-        getMessage: async () => { return { conversation: '' }; }
+        syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const statusCode = lastDisconnect.error?.output?.statusCode;
             if (statusCode !== DisconnectReason.loggedOut) {
-                console.log('🔄 Reconnecting...');
-                setTimeout(startBot, 5000);
+                console.log('🔄 Reconnecting Bot...');
+                await delay(5000);
+                startBot();
+            } else {
+                console.log('❌ Session Logged Out! Please update SESSION_ID.');
             }
         } else if (connection === 'open') {
-            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා!');
+            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා! බොට් දැන් විධානයන් ලබාගැනීමට සූදානම්.');
         }
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return; 
-        
+        if (type !== 'notify') return;
         const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        if (!msg.message) return;
 
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        // 🔍 ULTRA-STABLE MESSAGE TEXT EXTRACTOR
+        const messageContent = msg.message.ephemeralMessage?.message || msg.message.viewOnceMessage?.message || msg.message;
+        let text = messageContent.conversation || 
+                   messageContent.extendedTextMessage?.text || 
+                   messageContent.imageMessage?.caption || 
+                   messageContent.videoMessage?.caption || '';
+
+        text = text.trim();
+        if (!text.startsWith('.')) return; // Check for prefix
+
         const from = msg.key.remoteJid;
-        if (!text.trim().startsWith('.')) return;
-
-        const args = text.trim().slice(1).trim().split(/ +/);
+        const args = text.slice(1).split(/ +/);
         const command = args.shift().toLowerCase();
+
+        console.log(`💬 Received Command: .${command} from: ${from}`); // This will log on Railway console when you type!
 
         // 📄 MENU COMMAND
         if (command === 'menu') {
-            const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n⚙️ *ප්‍රධාන විධානයන්:*\n👉 📄 \`.menu\`\n👉 ⚡ \`.speed\`\n👉 📥 \`.sg [Group] [Link]\`\n👉 📥 \`.si [Link]\``;
+            const menuText = `🤖 *參 𝚉𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n⚙️ *ප්‍රධාන විධානයන්:*\n👉 📄 \`.menu\`\n👉 ⚡ \`.speed\`\n👉 📥 \`.sg [Group Name] [Link]\`\n👉 📥 \`.si [Link]\``;
             await sock.sendMessage(from, { text: menuText }, { quoted: msg });
         }
 
@@ -218,8 +218,6 @@ async function startBot() {
                 const targetGroup = Object.values(groups).find(g => g.subject.toLowerCase() === groupName.toLowerCase());
                 if (!targetGroup) return await sock.sendMessage(from, { text: `❌ '${groupName}' සමූහය සොයාගත නොහැක!` }, { quoted: msg });
                 targetJid = targetGroup.id;
-            } else if (from.endsWith('@g.us')) {
-                return await sock.sendMessage(from, { text: '❌ .si විධානය Inbox හි පමණක් ක්‍රියා කරයි!' }, { quoted: msg });
             }
 
             for (let i = 0; i < links.length; i++) {
@@ -230,7 +228,6 @@ async function startBot() {
                     const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
                     progressKey = fileInfo.progressKey;
                     
-                    // Upload using ReadStream straight from Disk
                     await sock.sendMessage(targetJid, { 
                         document: fs.createReadStream(tempFilePath), 
                         fileName: fileInfo.realFileName, 
@@ -243,7 +240,7 @@ async function startBot() {
                 } catch (e) {
                     await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
                 } finally {
-                    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); // Free up disk space immediately
+                    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                 }
             }
         }
