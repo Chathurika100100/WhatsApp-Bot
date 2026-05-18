@@ -5,6 +5,7 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
+const qs = require('qs');
 
 // 🔐 AUTOMATIC SESSION HANDLER FROM RAILWAY VARIABLES
 if (process.env.SESSION_ID) {
@@ -30,110 +31,63 @@ if (!fs.existsSync(tempFolder)) {
     fs.mkdirSync(tempFolder);
 }
 
-// Global Memory Session to hold FitGirl search results
-let userSessions = {};
-
-// 🔗 HELPER: RESOLVE REAL DIRECT DOWNLOAD LINK FROM HOSTPAGE
+// 🔗 HELPER: BYPASS FUCKINGFAST DOWNLOAD BUTTON (Form Submitter)
 async function resolveDirectLink(url) {
     const cleanUrl = url.split('#')[0];
     if (cleanUrl.includes('fuckingfast.co')) {
         try {
             const res = await axios.get(cleanUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+                }
             });
-            const $ = cheerio.load(res.data);
-            let directLink = $('a.btn-download').attr('href') || $('#download-btn').attr('href') || $('a[href*="/dl/"]').attr('href');
             
-            if (!directLink) {
-                $('a').each((i, el) => {
-                    const href = $(el).attr('href');
-                    if (href && (href.includes('/download/') || href.includes('/dl/') || href.includes('storage.'))) {
-                        directLink = href;
+            const $ = cheerio.load(res.data);
+            const form = $('form');
+            
+            if (form.length > 0) {
+                const formAction = form.attr('action') || cleanUrl;
+                let formData = {};
+                
+                form.find('input').each((i, input) => {
+                    const name = $(input).attr('name');
+                    const value = $(input).attr('value');
+                    if (name) {
+                        formData[name] = value || '';
                     }
                 });
+
+                const postRes = await axios.post(formAction, qs.stringify(formData), {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Referer': cleanUrl,
+                        'Origin': 'https://fuckingfast.co'
+                    },
+                    maxRedirects: 0,
+                    validateStatus: function (status) {
+                        return status >= 200 && status < 400; 
+                    }
+                });
+
+                const directLink = postRes.headers['location'] || postRes.config.url;
+                if (directLink && directLink !== cleanUrl) {
+                    return directLink;
+                }
             }
+
+            let directLink = $('a.btn-download').attr('href') || $('#download-btn').attr('href');
             return directLink || url;
         } catch (e) {
+            if (e.response && e.response.headers && e.response.headers['location']) {
+                return e.response.headers['location'];
+            }
+            console.error("🚫 FuckingFast Bypass Error:", e.message);
             return url;
         }
     }
     return url;
-}
-
-// 🔍 FITGIRL FUNCTIONS: Search games
-async function searchFitGirl(query) {
-    try {
-        const url = `https://fitgirl-repacks.site/?s=${encodeURIComponent(query)}`;
-        const response = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
-        const $ = cheerio.load(response.data);
-        let results = [];
-
-        $('article.post').each((i, el) => {
-            const title = $(el).find('h1.entry-title a').text().trim();
-            const link = $(el).find('h1.entry-title a').attr('href');
-            if (title && link) {
-                results.push({ title, link });
-            }
-        });
-        return results;
-    } catch (error) {
-        console.error("Search Error:", error);
-        return [];
-    }
-}
-
-// 🎯 EXTRACT RAW FUCKINGFAST LINKS (Deep Scraping for Paste Pages)
-async function getFitGirlLinks(pageUrl) {
-    try {
-        const response = await axios.get(pageUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
-        const $ = cheerio.load(response.data);
-        let mirrors = [];
-
-        // 1. මුලින්ම ප්‍රධාන පේජ් එකේ තියෙන FuckingFast ලින්ක්ස් ටික එකතු කරගන්නවා
-        $('div.entry-content ul li a').each((i, el) => {
-            const href = $(el).attr('href');
-            if (href && href.includes('fuckingfast.co')) {
-                mirrors.push(href);
-            }
-        });
-
-        // 2. වැදගත්ම කොටස: එකතු කරගත් ලින්ක් එකක් "paste.fitgirl-repacks.site" වගේ එකක් නම්, ඒක ඇතුළට ගිහින් සැබෑ ලින්ක්ස් ටික හාරලා ගන්නවා
-        let finalPartLinks = [];
-        for (let link of mirrors) {
-            if (link.includes('paste.fitgirl-repacks.site') || link.includes('/?')) {
-                try {
-                    const pasteRes = await axios.get(link, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
-                    const $paste = cheerio.load(pasteRes.data);
-                    
-                    $paste('a').each((j, elElement) => {
-                        const directHref = $paste(elElement).attr('href');
-                        // මෙතනදී .rar, .zip හෝ fuckingfast එකේ download ලින්ක්ස් ටික වෙන් කරගන්නවා
-                        if (directHref && directHref.includes('fuckingfast.co') && !directHref.includes('paste.fitgirl')) {
-                            if (!finalPartLinks.includes(directHref)) {
-                                finalPartLinks.push(directHref);
-                            }
-                        }
-                    });
-                } catch (err) {
-                    console.error("Error reading paste page:", err.message);
-                }
-            } else {
-                if (!finalPartLinks.includes(link)) {
-                    finalPartLinks.push(link);
-                }
-            }
-        }
-
-        // Setup.exe එක විතරක් තියෙන ලින්ක් එක අයින් කරලා, .part001.rar වගේ තියෙන සැබෑ ගේම් ෆයිල්ස් විතරක් ඉතිරි කරගන්නවා
-        return finalPartLinks.filter(l => !l.toLowerCase().includes('setup_proper.exe') && !l.toLowerCase().includes('setup.exe'));
-    } catch (error) {
-        console.error("Link Fetch Error:", error);
-        return [];
-    }
 }
 
 // MAIN BOT FUNCTION
@@ -178,7 +132,7 @@ async function startBot() {
             const args = trimmedText.slice(1).trim().split(/ +/);
             const command = args.shift().toLowerCase();
 
-            // 📄 MENU COMMAND
+            // 📄 MENU COMMAND (FitGirl ඉවත් කරන ලදී)
             if (command === 'menu') {
                 const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n` +
                                  `⚙️ *ප්‍රධාන විධානයන්:*\n` +
@@ -186,9 +140,6 @@ async function startBot() {
                                  `👉 ⚡ \`.speed\` - සර්වර් වේගය බැලීමට.\n` +
                                  `👉 📥 \`.sg [GroupName] [Link]\` - ෆයිල් එක Group එකට යැවීමට.\n` +
                                  `👉 📥 \`.si [Link]\` - ෆයිල් එක Inbox ලබා ගැනීමට.\n\n` +
-                                 `🎮 *𝙵𝙸𝚃𝙶𝙸𝚁𝙻 𝙲𝙾𝙼𝙼𝙰𝙽𝙳𝚂:*\n` +
-                                 `👉 🔍 \`.fitgirl [GameName]\` - ගේම් සර්ච් කිරීමට.\n` +
-                                 `👉 📦 \`.fgparts [Number]\` - කෙලින්ම සියලුම Parts මෙම චැට් එකටම ඩවුන්ලෝඩ් කර ගැනීමට.\n\n` +
                                  `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
                                  
                 await sock.sendMessage(from, { text: menuText }, { quoted: msg });
@@ -321,77 +272,6 @@ async function startBot() {
                         if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
                     }
                 }
-            }
-
-            // 🛑 STEP 1: FITGIRL SEARCH (.fitgirl gta v)
-            if (command === 'fitgirl') {
-                const query = args.join(' ').trim();
-                if (!query) return await sock.sendMessage(from, { text: '❌ භාවිතය: .fitgirl [Game Name]' }, { quoted: msg });
-
-                await sock.sendMessage(from, { text: `🔍 *${query}* සර්ච් කරමින් පවතී...` }, { quoted: msg });
-                const results = await searchFitGirl(query);
-                
-                if (results.length === 0) return await sock.sendMessage(from, { text: '❌ කිසිදු ගේම් එකක් හමු නොවිය.' }, { quoted: msg });
-
-                userSessions[from] = results; 
-                let responseText = `🎮 *Search Results:* _${query}_\n\n`;
-                results.forEach((res, index) => { responseText += `*${index + 1}.* ${res.title}\n`; });
-                responseText += `\n👉 සියලුම Parts කෙලින්ම මෙතනටම ගෙන්න ගන්න: \n*.fgparts <number>* (උදා: .fgparts 1)`;
-                
-                await sock.sendMessage(from, { text: responseText }, { quoted: msg });
-                return;
-            }
-
-            // 🛑 STEP 2: AUTOMATIC DOWNLOAD & SEND ALL PARTS DIRECTLY (.fgparts 1)
-            if (command === 'fgparts') {
-                const index = parseInt(args[0]) - 1;
-                if (!userSessions[from] || isNaN(index) || !userSessions[from][index]) {
-                    return await sock.sendMessage(from, { text: '❌ කරුණාකර මුලින්ම .fitgirl සර්ච් කරන්න.' }, { quoted: msg });
-                }
-
-                const selectedGame = userSessions[from][index];
-                await sock.sendMessage(from, { text: `⏳ *${selectedGame.title}* හි FuckingFast ලින්ක්ස් පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
-                
-                // Deep scraped links list
-                const links = await getFitGirlLinks(selectedGame.link);
-                if (links.length === 0) return await sock.sendMessage(from, { text: '❌ මෙම ගේම් එක සඳහා FuckingFast ලින්ක්ස් හමු නොවිය.' }, { quoted: msg });
-
-                await sock.sendMessage(from, { text: `📦 මුළු ෆයිල්ස් (Parts) ප්‍රමාණය: ${links.length}\n📥 සියල්ලම ස්වයංක්‍රීයව ඩවුන්ලෝඩ් වී මෙම චැට් එකටම ලැබීම ආරම්භ විය...` }, { quoted: msg });
-
-                for (let i = 0; i < links.length; i++) {
-                    let tempFilePath = '';
-                    try {
-                        const finalUrl = await resolveDirectLink(links[i]);
-                        let realFileName = `part_${i + 1}_${Date.now()}.bin`;
-                        
-                        const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 0 });
-                        
-                        const cd = response.headers['content-disposition'];
-                        if (cd) {
-                            const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i) || cd.match(/filename=["']?([^"'\n;]+)["']?/i);
-                            if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
-                        }
-
-                        tempFilePath = path.join(tempFolder, `temp_auto_${Date.now()}_${i}`);
-                        const writer = fs.createWriteStream(tempFilePath);
-                        response.data.pipe(writer);
-                        await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
-
-                        await sock.sendMessage(from, { 
-                            document: { url: tempFilePath }, 
-                            fileName: realFileName, 
-                            mimetype: response.headers['content-type'] || 'application/octet-stream' 
-                        });
-
-                    } catch (e) {
-                        await sock.sendMessage(from, { text: `❌ Part ${i + 1} ඩවුන්ලෝඩ් කිරීමේදී දෝෂයක් ඇතිවිය: ${e.message}` });
-                    } finally {
-                        if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-                    }
-                }
-
-                await sock.sendMessage(from, { text: `✅ *${selectedGame.title}* හි සියලුම ෆයිල්ස් එවා අවසන්!` });
-                return;
             }
 
         } catch (globalErr) {
