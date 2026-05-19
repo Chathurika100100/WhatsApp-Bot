@@ -1,8 +1,9 @@
+import 'dotenv/config'; // Environment variables කියවීමට මේක අනිවාර්යයි
 import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import speedTest from 'speedtest-net';
 import fs from 'fs';
-import http from 'http'; // අලුතින් එකතු කළා
+import http from 'http'; 
 
 // 🌐 Railway එකට බොට් ක්‍රියාත්මක බව පෙන්වීමට පොඩි Server එකක්
 const server = http.createServer((req, res) => {
@@ -25,12 +26,17 @@ async function startBot() {
 
     // 🔑 Pairing Code ඉල්ලීම
     if (!sock.authState.creds.registered) {
-        const phoneNumber = "94726046800"; // ඔයාගේ WhatsApp අංකය
+        // 📞 Railway Variables වලින් ෆෝන් නම්බර් එක ලබා ගැනීම
+        const phoneNumber = process.env.PHONE_NUMBER; 
         
-        // තත්පර 5ක් ඉඳලා එක පාරක් විතරක් කෝඩ් එක ගන්නවා
+        if (!phoneNumber) {
+            console.error("\n❌ ERROR: PHONE_NUMBER කියන Variable එක Railway එකේ දාලා නැහැ! කරුණාකර ඒක එකතු කරන්න.\n");
+            process.exit(1);
+        }
+        
         setTimeout(async () => {
             try {
-                const code = await sock.requestPairingCode(phoneNumber);
+                const code = await sock.requestPairingCode(phoneNumber.trim());
                 console.log(`\n=========================================================`);
                 console.log(`🔑 ඔයාගේ අලුත් PAIRING CODE එක: ${code}`);
                 console.log(`=========================================================\n`);
