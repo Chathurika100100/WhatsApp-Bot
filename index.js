@@ -5,57 +5,54 @@ import speedTest from 'speedtest-net';
 import fs from 'fs';
 import path from 'path';
 
-// 📂 Session ID එකෙන් ලොගින් ෆයිල්ස් ටික නැවත සකස් කරන Function එක
+// 📂 Session ID එක පරීක්ෂා කර Decode කරන Function එක
 function restoreSession() {
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
-        console.error("ERROR: SESSION_ID is missing in Environment Variables!");
+        console.error("❌ ERROR: SESSION_ID is missing in Environment Variables!");
         process.exit(1);
     }
 
     const authFolder = './auth_info_baileys';
-    
-    // ෆෝල්ඩර් එක නැත්නම් හදනවා
     if (!fs.existsSync(authFolder)) {
         fs.mkdirSync(authFolder, { recursive: true });
     }
 
     const credsPath = path.join(authFolder, 'creds.json');
 
-    // creds.json එක දැනටමත් නැත්නම් විතරක් Session ID එකෙන් හදනවා
     if (!fs.existsSync(credsPath)) {
         try {
             console.log("Restoring session from SESSION_ID...");
             
-            // සමහර බොට්ස් වල Session ID එක මැදට යනකම් විවිධ prefixes තියෙනවා (උදා: Session;;; හෝ BotName~)
-            // ඒ නිසා Base64 කොටස විතරක් වෙන් කරගන්නවා
             let base64String = sessionId;
             if (sessionId.includes(';;;')) base64String = sessionId.split(';;;').pop();
             else if (sessionId.includes('~')) base64String = sessionId.split('~').pop();
             else if (sessionId.includes(':')) base64String = sessionId.split(':').pop();
 
-            // Base64 Text එක සාමාන්‍ය JSON එකකට Decode කිරීම
             const decrypted = Buffer.from(base64String, 'base64').toString('utf-8');
             
-            // creds.json ෆයිල් එක ලෙස Save කිරීම
+            // 🔍 වැදගත්: Decode කරපු දත්ත නිවැරදි JSON එකක්ද කියා පරීක්ෂා කිරීම
+            JSON.parse(decrypted); 
+            
             fs.writeFileSync(credsPath, decrypted);
             console.log("✅ Session Credentials successfully restored!");
         } catch (err) {
-            console.error("❌ Failed to decode SESSION_ID. Please check if your Session ID is valid.", err);
-            process.exit(1);
+            console.error("❌ ERROR: ඔයාගේ SESSION_ID එක වැරදියි හෝ බිඳී ඇත! (Invalid JSON/Base64 string)");
+            console.error("කරුණාකර Railway Environment Variables වල තියෙන Session ID එක පරීක්ෂා කරන්න.");
+            process.exit(1); // ලූප් වෙන්නේ නැතුව බොට් එක නවත්වනවා
         }
     }
 }
 
 async function startBot() {
-    // බොට් පටන් ගන්න කලින් Session එක restore කරගන්නවා
     restoreSession();
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false // සෙෂන් ID එක තියෙන නිසා QR පෙන්වන්න ඕන නෑ
+        printQRInTerminal: false,
+        browser: ['Ubuntu', 'Chrome', '22.04.4'] // Standard browser agent
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -107,7 +104,7 @@ async function startBot() {
             groupName = groupName.trim().toLowerCase();
 
             if (!groupName) {
-                return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර Group එකේ නම ඇතුළත් කරන්න.' }, { quoted: msg });
+                return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර Group එකේ นම ඇතුළත් කරන්න.' }, { quoted: msg });
             }
 
             await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක හොයමින් පවතී...` });
@@ -173,7 +170,7 @@ async function startBot() {
                              `*1. .si [links]*\n` +
                              `> ලින්ක්ස් වලින් ෆයිල් ඩවුන්ලෝඩ් කරලා ඔයාගේ Inbox එකටම එවයි.\n\n` +
                              `*2. .sg [group name] [links]*\n` +
-                             `> අදාළ ලින්ක්ස් වලින් ෆයිල් ඩවුන්ලෝඩ් කරලා ඔයා කියන Group එකට යවයි.\n\n` +
+                             `> අදාළ ලින්ක්ස් වලින් ෆයිල් ඩවුන්ලೋඩ් කරලා ඔයා කියන Group එකට යවයි.\n\n` +
                              `*3. .speed*\n` +
                              `> බොට් ඉන්න Server එකේ Ping එක, Download/Upload වේගය පෙන්නයි.\n\n` +
                              `*4. .menu*\n` +
@@ -183,11 +180,24 @@ async function startBot() {
         }
     });
 
+    // 🔄 වඩාත් ආරක්ෂිත Reconnect Logic එකක්
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startBot();
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            
+            console.log(`⚠️ Connection closed. Status Code: ${statusCode}`);
+            
+            if (shouldReconnect) {
+                console.log('🔄 Reconnecting in 5 seconds...');
+                setTimeout(() => startBot(), 5000); // දිගටම වේගයෙන් loop වීම වැළැක්වීමට තත්පර 5ක ප්‍රමාදයක්
+            } else {
+                console.log('❌ Session එක සම්පූර්ණයෙන්ම ලොග් අවුට් වී ඇත. කරුණාකර අලුත් Session ID එකක් ලබාගන්න.');
+                if (fs.existsSync('./auth_info_baileys')) {
+                    fs.rmSync('./auth_info_baileys', { recursive: true, force: true });
+                }
+            }
         } else if (connection === 'open') {
             console.log('🎉 WhatsApp Bot is successfully connected and authenticated!');
         }
