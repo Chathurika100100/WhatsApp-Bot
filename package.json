@@ -1,17 +1,18 @@
 {
-  "name": "whatsapp-railway-bot",
+  "name": "rv-games-bot",
   "version": "1.0.0",
-  "description": "WhatsApp Downloader Bot",
+  "description": "WhatsApp Downloader Bot for RV Games",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
-    "qrcode-terminal": "^0.12.0",
-    "dotenv": "^16.4.5",
+    "@whiskeysockets/baileys": "^6.7.3",
     "axios": "^1.6.8",
-    "speedtest-net": "^2.2.0"
-  }
+    "dotenv": "^16.4.5",
+    "pino": "^8.21.0"
+  },
+  "author": "RV Games",
+  "license": "MIT"
 }
