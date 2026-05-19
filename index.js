@@ -1,254 +1,183 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const axios = require('axios');
-const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
-const { Transform } = require('stream');
 
-// 📂 DISK USE OPTIMIZATION: MOVING ALL PATHS TO ALLOWED /tmp DIRECTORY
-const baseTmpPath = '/tmp/whatsapp_bot_data';
-const sessionPath = path.join(baseTmpPath, 'session');
-const tempFolder = path.join(baseTmpPath, 'temp_downloads');
-
-// Ensure directories exist in /tmp to bypass Railway Read-Only restrictions
-if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
-if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder, { recursive: true });
-
-// 🔐 SESSION INITIALIZER (WRITING TO ALLOWED /tmp STORAGE TO PREVENT ENOENT/EROFS)
+// Railway එකේ දාන Session ID එක ෆයිල් එකක් බවට පත් කිරීම
 if (process.env.SESSION_ID) {
+    if (!fs.existsSync('./session')) {
+        fs.mkdirSync('./session');
+    }
     try {
-        let decryptedCreds = '';
-        if (process.env.SESSION_ID.startsWith('node_')) {
-            decryptedCreds = Buffer.from(process.env.SESSION_ID.replace('node_', ''), 'base64').toString('utf-8');
-        } else {
-            decryptedCreds = Buffer.from(process.env.SESSION_ID, 'base64').toString('utf-8');
-        }
+        const decryptedCreds = Buffer.from(process.env.SESSION_ID, 'base64').toString('utf-8');
         JSON.parse(decryptedCreds); 
-        fs.writeFileSync(path.join(sessionPath, 'creds.json'), decryptedCreds);
-        console.log("✅ SESSION_ID සාර්ථකව /tmp පද්ධතියට ඇතුළත් කරන ලදී!");
+        fs.writeFileSync('./session/creds.json', decryptedCreds);
     } catch (e) {
-        fs.writeFileSync(path.join(sessionPath, 'creds.json'), process.env.SESSION_ID);
-        console.log("✅ SESSION_ID (Raw JSON) සාර්ථකව /tmp පද්ධතියට ඇතුළත් කරන ලදී!");
+        fs.writeFileSync('./session/creds.json', process.env.SESSION_ID);
     }
 }
 
-// 🔗 BYPASS DIRECT LINK EXTRACTOR (Fuckingfast & Direct link support)
-async function resolveDirectLink(url) {
-    const cleanUrl = url.split('#')[0];
-    if (cleanUrl.includes('fuckingfast.co')) {
-        try {
-            const res = await axios.get(cleanUrl, {
-                headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                    'Accept': 'text/html'
-                },
-                timeout: 30000
-            });
-            
-            const $ = cheerio.load(res.data);
-            const form = $('form');
-            
-            if (form.length > 0) {
-                let formAction = form.attr('action') || cleanUrl;
-                if (!formAction.startsWith('http')) formAction = new URL(formAction, cleanUrl).href;
-
-                let formData = new URLSearchParams();
-                form.find('input').each((i, input) => {
-                    const name = $(input).attr('name');
-                    if (name) formData.append(name, $(input).attr('value') || '');
-                });
-
-                const postRes = await axios.post(formAction, formData.toString(), {
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    maxRedirects: 0,
-                    validateStatus: status => status >= 200 && status < 400
-                });
-
-                const directLink = postRes.headers['location'] || postRes.config.url;
-                if (directLink && directLink !== cleanUrl) return directLink;
-            }
-            return $('a.btn-download').attr('href') || $('#download-btn').attr('href') || url;
-        } catch (e) {
-            if (e.response?.headers?.location) return e.response.headers.location;
-            return url;
-        }
-    }
-    return url;
-}
-
-// ⏳ LIVE PROGRESS DOWNLOADER (STREAMING ENTIRELY TO DISK TO KEEP RAM LOW)
-async function downloadFileWithProgress(url, outputPath, sock, from, quotedMsg) {
-    const finalUrl = await resolveDirectLink(url);
-    
-    // Request as stream so it doesn't load the file into memory/RAM
-    const response = await axios({ method: 'get', url: finalUrl, responseType: 'stream', timeout: 120000 });
-    
-    let realFileName = `file_${Date.now()}.bin`;
-    const cd = response.headers['content-disposition'];
-    if (cd) {
-        const fm = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"'\n;]+)["']?/i);
-        if (fm && fm[1]) realFileName = decodeURIComponent(fm[1]).replace(/["']/g, "").trim();
-    }
-    const mimetype = response.headers['content-type'] || 'application/octet-stream';
-    const totalBytes = parseInt(response.headers['content-length'], 10) || 0;
-    
-    const progressMsg = await sock.sendMessage(from, { text: `⏳ ඩවුන්ලෝඩ් එක සූදානම් කරමින් පවතී...` }, { quoted: quotedMsg });
-    
-    let downloadedBytes = 0;
-    let lastUpdate = Date.now();
-
-    const progressTracker = new Transform({
-        transform(chunk, encoding, callback) {
-            downloadedBytes += chunk.length;
-            const now = Date.now();
-            
-            // Updates every 5 seconds to minimize network overload
-            if (now - lastUpdate > 5000 && totalBytes > 0) {
-                lastUpdate = now;
-                const percentage = ((downloadedBytes / totalBytes) * 100).toFixed(1);
-                const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
-                const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
-                const filled = Math.round((downloadedBytes / totalBytes) * 10);
-                const bar = '■'.repeat(filled) + '□'.repeat(10 - filled);
-                
-                sock.sendMessage(from, { 
-                    text: `⏳ *DOWNLOADING FILE*\n\n📁 *File:* \`${realFileName}\`\n📊 *Progress:* [${bar}] ${percentage}%\n📦 *Size:* ${downloadedMB} MB / ${totalMB} MB\n\n_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`,
-                    edit: progressMsg.key 
-                }).catch(() => {});
-            }
-            this.push(chunk);
-            callback();
-        }
-    });
-
-    const writer = fs.createWriteStream(outputPath);
-    await new Promise((resolve, reject) => {
-        response.data.pipe(progressTracker).pipe(writer);
-        writer.on('finish', () => {
-            sock.sendMessage(from, { text: `✅ ඩවුන්ලෝඩ් එක සාර්ථකයි! දැන් WhatsApp වෙත අප්ලෝඩ් වෙමින් පවතී...`, edit: progressMsg.key }).catch(() => {});
-            resolve();
-        });
-        writer.on('error', reject);
-        response.data.on('error', reject);
-    });
-
-    return { realFileName, mimetype, progressKey: progressMsg.key };
-}
-
-// 🤖 MAIN BOT APPLICATION
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+    const { state, saveCreds } = await useMultiFileAuthState('./session');
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false, // Disables heavy history syncs to prevent memory crashes
-        shouldSyncHistoryMessage: () => false
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', async (update) => {
+    sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            const statusCode = lastDisconnect.error?.output?.statusCode;
-            if (statusCode !== DisconnectReason.loggedOut) {
-                console.log('🔄 Reconnecting Bot...');
-                await delay(5000);
-                startBot();
+            const statusCode = lastDisconnect.error?.output?.statusCode || lastDisconnect.error?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            console.log(`සම්බන්ධතාවය බිඳ වැටුණා (Status: ${statusCode}). නැවත උත්සාහ කරයි...`, shouldReconnect);
+            if (shouldReconnect) {
+                setTimeout(() => startBot(), 5000);
             }
         } else if (connection === 'open') {
-            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා! බොට් දැන් සූදානම්.');
+            console.log('✅ WhatsApp Bot සාර්ථකව සම්බන්ධ වුණා!');
         }
     });
 
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
+    sock.ev.on('messages.upsert', async ({ messages }) => {
         const msg = messages[0];
-        if (!msg.message) return;
+        if (!msg.message || msg.key.fromMe) return;
 
-        // Stable text extractor from any source (Inbox, Groups, Self)
-        const messageContent = msg.message.ephemeralMessage?.message || msg.message.viewOnceMessage?.message || msg.message;
-        let text = messageContent.conversation || 
-                   messageContent.extendedTextMessage?.text || 
-                   messageContent.imageMessage?.caption || 
-                   messageContent.videoMessage?.caption || '';
-
-        text = text.trim();
-        if (!text.startsWith('.')) return;
-
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         const from = msg.key.remoteJid;
-        const args = text.slice(1).split(/ +/);
-        const command = args.shift().toLowerCase();
 
-        console.log(`💬 Command Received: .${command} from ${from}`);
-
-        // 📄 MENU COMMAND
-        if (command === 'menu') {
-            const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n⚙️ *ප්‍රධාන විධානයන්:*\n👉 📄 \`.menu\`\n👉 ⚡ \`.speed\`\n👉 📥 \`.sg [Group Name] [Link]\`\n👉 📥 \`.si [Link]\``;
+        // 1. MENU COMMAND (.menu)
+        if (text === '.menu') {
+            const menuText = `🤖 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃* 🤖\n\n` +
+                             `👋 ආයුබෝවන්! මෙන්න මගේ විධානයන් (Commands) ලැයිස්තුව:\n\n` +
+                             `⚙️ *ප්‍රධාන විධානයන්:*\n` +
+                             `👉 📄 \`.menu\` - මෙම මෙනුව ලබා ගැනීමට.\n` +
+                             `👉 ⚡ \`.speed\` - සර්වර් එකේ වේගය (Speed Test) බැලීමට.\n` +
+                             `👉 📥 \`.sg [GroupName] [Link1] [Link2]\` - ලින්ක් มඟින් ගොනු ඩවුන්ලෝඩ් කර අදාළ සමූහයට යැවීමට.\n\n` +
+                             `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
+                             
             await sock.sendMessage(from, { text: menuText }, { quoted: msg });
+            return;
         }
 
-        // ⚡ SPEED TEST COMMAND
-        if (command === 'speed') {
-            await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
-            try {
-                const start = performance.now();
-                await axios.get('https://www.google.com', { timeout: 10000 });
-                const ping = (performance.now() - start).toFixed(0);
-                await sock.sendMessage(from, { text: `⚡ *Server Speed:*\n🔹 Ping: ${ping} ms` }, { quoted: msg });
-            } catch (err) {
-                await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${err.message}` }, { quoted: msg });
-            }
-        }
-
-        // 📥 REMOTE DOWNLOAD COMMANDS (.sg & .si)
-        if (command === 'sg' || command === 'si') {
-            const fullBody = args.join(' ');
-            const links = fullBody.match(/(https?:\/\/[^\s]+)/g) || [];
+        // 2. SPEED TEST COMMAND (.speed)
+        if (text === '.speed') {
+            await sock.sendMessage(from, { text: '⚡ වේගය පරීක්ෂා කරමින් පවතී, කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
             
-            if (links.length === 0) return await sock.sendMessage(from, { text: `❌ භාවිතය: .${command} [Link]` }, { quoted: msg });
+            try {
+                const pingStart = performance.now();
+                await axios.get('https://www.google.com');
+                const ping = (performance.now() - pingStart).toFixed(0);
 
-            let targetJid = from;
-            if (command === 'sg') {
-                const groupName = fullBody.replace(/(https?:\/\/[^\s]+)/g, '').replace(/[\[\]]/g, '').trim();
-                if (!groupName) return await sock.sendMessage(from, { text: '❌ සමූහයේ නම ඇතුළත් කරන්න.' }, { quoted: msg });
-                
-                const groups = await sock.groupFetchAllParticipating();
-                const targetGroup = Object.values(groups).find(g => g.subject.toLowerCase() === groupName.toLowerCase());
-                if (!targetGroup) return await sock.sendMessage(from, { text: `❌ '${groupName}' සමූහය සොයාගත නොහැක!` }, { quoted: msg });
-                targetJid = targetGroup.id;
+                const dlStart = performance.now();
+                await axios.get('https://speed.cloudflare.com/__down?bytes=1048576', { responseType: 'arraybuffer' });
+                const dlEnd = performance.now();
+                const dlTime = (dlEnd - dlStart) / 1000; 
+                const downloadSpeed = (1 / dlTime).toFixed(2); 
+
+                const ulStart = performance.now();
+                const dummyBuffer = Buffer.alloc(1048576); 
+                await axios.post('https://httpbin.org/post', dummyBuffer);
+                const ulEnd = performance.now();
+                const ulTime = (ulEnd - ulStart) / 1000;
+                const uploadSpeed = (1 / ulTime).toFixed(2); 
+
+                const speedResult = `⚡ *𝚂𝙴𝚁𝚅𝙴𝚁 𝚂𝙿𝙴𝙴𝙳 𝚃𝙴𝚂𝚃 𝚁𝙴𝚂𝚄𝙻𝚃𝚂*\n\n` +
+                                    `🔹 *Ping:* ${ping} ms\n` +
+                                    `🔹 *Download Speed:* ${downloadSpeed} MB/s\n` +
+                                    `🔹 *Upload Speed:* ${uploadSpeed} MB/s\n\n` +
+                                    `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games_`;
+
+                await sock.sendMessage(from, { text: speedResult }, { quoted: msg });
+            } catch (err) {
+                await sock.sendMessage(from, { text: `❌ වේගය මැනීමේදී දෝෂයක් ඇති විය: ${err.message}` }, { quoted: msg });
+            }
+            return;
+        }
+
+        // 3. FILE DOWNLOAD & FORWARD (.sg)
+        if (text.startsWith('.sg ')) {
+            const commandBody = text.slice(4).trim();
+            
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const links = commandBody.match(urlRegex) || [];
+            
+            let groupNameInput = commandBody.replace(urlRegex, '').trim();
+            groupNameInput = groupNameInput.replace(/[\[\]]/g, '').trim();
+
+            if (!groupNameInput || links.length === 0) {
+                await sock.sendMessage(from, { text: '❌ කරුණාකර නිවැරදිව ඇතුලත් කරන්න.\nනියැදිය: .sg RV Games https://link1.com' }, { quoted: msg });
+                return;
             }
 
-            for (let i = 0; i < links.length; i++) {
-                const tempFilePath = path.join(tempFolder, `dl_${Date.now()}_${i}.bin`);
-                let progressKey = null;
+            await sock.sendMessage(from, { text: `⏳ '${groupNameInput}' සමූහය සොයමින් පවතී...` }, { quoted: msg });
 
-                try {
-                    // Downloads safely to Disk Storage
-                    const fileInfo = await downloadFileWithProgress(links[i], tempFilePath, sock, from, msg);
-                    progressKey = fileInfo.progressKey;
-                    
-                    // Streams directly out of Disk storage to save RAM usage
-                    await sock.sendMessage(targetJid, { 
-                        document: fs.createReadStream(tempFilePath), 
-                        fileName: fileInfo.realFileName, 
-                        mimetype: fileInfo.mimetype 
-                    });
-                    
-                    if (progressKey) {
-                        await sock.sendMessage(from, { text: `✅ \`${fileInfo.realFileName}\` සාර්ථකව යවන ලදී!`, edit: progressKey });
-                    }
-                } catch (e) {
-                    await sock.sendMessage(from, { text: `❌ දෝෂයකි: ${e.message}` }, { quoted: msg });
-                } finally {
-                    // Instantly wipe from disk storage to prevent hitting space limitations
-                    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+            try {
+                const getGroups = await sock.groupFetchAllParticipating();
+                const groups = Object.values(getGroups);
+                const targetGroup = groups.find(g => g.subject.toLowerCase().trim() === groupNameInput.toLowerCase());
+
+                if (!targetGroup) {
+                    await sock.sendMessage(from, { text: `❌ '${groupNameInput}' නමින් සමූහයක් සොයාගත නොහැකි විය!` }, { quoted: msg });
+                    return;
                 }
+
+                const jobStartTime = performance.now();
+                const totalLinks = links.length;
+
+                for (let i = 0; i < totalLinks; i++) {
+                    const link = links[i];
+                    try {
+                        await sock.sendMessage(from, { text: `📥 ගොනුව බාගත වෙමින් පවතී (${i + 1}/${totalLinks}):\n🔗 ${link}` });
+                        
+                        const response = await axios({ method: 'get', url: link, responseType: 'arraybuffer' });
+                        const buffer = Buffer.from(response.data, 'binary');
+                        
+                        let fileName = `file_${Date.now()}`;
+                        try {
+                            const parsedUrl = new URL(link);
+                            fileName = path.basename(parsedUrl.pathname) || fileName;
+                        } catch (e) {}
+
+                        await sock.sendMessage(targetGroup.id, {
+                            document: buffer,
+                            fileName: fileName,
+                            mimetype: response.headers['content-type'] || 'application/octet-stream',
+                            caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
+                        });
+
+                    } catch (err) {
+                        await sock.sendMessage(from, { text: `❌ දෝෂයකි (Link ${i+1}): ${err.message}` });
+                    }
+                }
+
+                const jobEndTime = performance.now();
+                const timeTaken = ((jobEndTime - jobStartTime) / 1000).toFixed(1);
+
+                const doneMessage = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
+                                    `     ⚙️ *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂* ⚙️\n` +
+                                    `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
+                                    `┌────────────────────────\n` +
+                                    `│ ✅ *Status:* Done\n` +
+                                    `│ 📦 *Total Parts:* ${totalLinks}\n` +
+                                    `│ ⏱️ *Time Taken:* ${timeTaken}s\n` +
+                                    `└────────────────────────\n\n` +
+                                    `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*_`;
+
+                // 🌟 වෙනස් කළ ස්ථානය: මෙන්න මෙතනින් Done මැසේජ් එක කෙලින්ම ගෲප් එක ඇතුලටම (targetGroup.id) සෙන්ඩ් වෙනවා
+                await sock.sendMessage(targetGroup.id, { text: doneMessage });
+
+                // කමාන්ඩ් එක දාපු කෙනාටත් වැඩේ ඉවරයි කියලා දැනගන්න පොඩි කන්ෆර්මේෂන් එකක් යැවීම (Optional)
+                await sock.sendMessage(from, { text: `✅ සියලුම ගොනු සහ සාරාංශය (Summary) '${targetGroup.subject}' සමූහයට සාර්ථකව යවන ලදී!` }, { quoted: msg });
+
+            } catch (error) {
+                await sock.sendMessage(from, { text: `❌ පද්ධති දෝෂයකි: ${error.message}` }, { quoted: msg });
             }
         }
     });
