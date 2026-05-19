@@ -1,14 +1,13 @@
 import 'dotenv/config'; 
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import speedTest from 'speedtest-net';
 import fs from 'fs';
 import path from 'path';
 import http from 'http'; 
 
 // 🌐 Railway එක crash වීම වැළැක්වීමට ඇති Web Server එක
 const server = http.createServer((req, res) => {
-    res.end('WhatsApp Bot is Online!');
+    res.end('RV Games WhatsApp Bot is Online!');
 });
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
@@ -17,7 +16,7 @@ server.listen(PORT, () => {
 
 const authFolder = './bot_session';
 
-// 📂 Session ID එක කියවා creds.json ෆයිල් එක සාදන Function එක (මෙය ධාවනය වන්නේ එක් වරක් පමණි)
+// 📂 Session ID එක කියවා creds.json ෆයිල් එක සාදන Function එක
 function setupSession() {
     const credsPath = path.join(authFolder, 'creds.json');
 
@@ -56,7 +55,7 @@ setupSession();
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState(authFolder);
-    const { version } = await fetchLatestBaileysVersion(); // අලුත්ම WhatsApp Version එක ගනී
+    const { version } = await fetchLatestBaileysVersion(); 
 
     const sock = makeWASocket({
         version,
@@ -64,7 +63,7 @@ async function startBot() {
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }), 
         browser: ['Ubuntu', 'Chrome', '22.04.4'],
-        syncFullHistory: false // අනවශ්‍ය Data load වීම නවත්වයි
+        syncFullHistory: false 
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -132,35 +131,64 @@ async function startBot() {
 
         // 3️⃣ .speed Command
         else if (text.trim() === '.speed') {
-            await sock.sendMessage(msg.key.remoteJid, { text: '🚀 වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
-            const startPing = Date.now();
+            await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී. කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
+            
             try {
-                const speed = await speedTest({ acceptLicense: true, acceptGdpr: true });
-                const pingTime = Date.now() - startPing;
-                const downloadSpeed = (speed.download.bandwidth / 125000).toFixed(2); 
-                const uploadSpeed = (speed.upload.bandwidth / 125000).toFixed(2);     
-                const speedText = `*⚡ Speed Test Results*\n\n🏓 Ping: ${pingTime} ms\n⬇️ Download: ${downloadSpeed} Mbps\n⬆️ Upload: ${uploadSpeed} Mbps`;
+                // 1. Ping පරීක්ෂා කිරීම
+                const pingStart = Date.now();
+                await fetch('https://httpbin.org/ping');
+                const pingTime = Date.now() - pingStart;
+
+                // 2. Download Speed පරීක්ෂා කිරීම (1MB)
+                const dlStart = Date.now();
+                const dlResponse = await fetch('https://httpbin.org/bytes/1048576');
+                if (!dlResponse.ok) throw new Error('Download failed');
+                const fileBuffer = await dlResponse.arrayBuffer();
+                const dlEnd = Date.now();
+                
+                const dlDuration = (dlEnd - dlStart) / 1000;
+                const downloadSpeed = (8 / dlDuration).toFixed(2);
+
+                // 3. Upload Speed පරීක්ෂා කිරීම (1MB)
+                const ulStart = Date.now();
+                const ulResponse = await fetch('https://httpbin.org/post', {
+                    method: 'POST',
+                    body: fileBuffer
+                });
+                if (!ulResponse.ok) throw new Error('Upload failed');
+                const ulEnd = Date.now();
+                
+                const ulDuration = (ulEnd - ulStart) / 1000;
+                const uploadSpeed = (8 / ulDuration).toFixed(2);
+
+                // ප්‍රතිඵල සැකසීම (යටින් තිබුණු සටහන ඉවත් කර ඇත)
+                const speedText = `*⚡ RV Games Speed Test*\n\n` +
+                                  `🏓 *Ping:* ${pingTime} ms\n` +
+                                  `📥 *Download Speed:* ${downloadSpeed} Mbps\n` +
+                                  `📤 *Upload Speed:* ${uploadSpeed} Mbps`;
+
                 await sock.sendMessage(msg.key.remoteJid, { text: speedText }, { quoted: msg });
+
             } catch (error) {
-                await sock.sendMessage(msg.key.remoteJid, { text: '❌ Speed test එක වැඩ කරන්නේ නැහැ.' }, { quoted: msg });
+                console.error(error);
+                await sock.sendMessage(msg.key.remoteJid, { text: '❌ Speed test එක කරද්දී පොඩි අවුලක් ආවා. නැවත උත්සාහ කරන්න.' }, { quoted: msg });
             }
         }
 
         // 4️⃣ .menu Command
         else if (text.trim() === '.menu') {
-            const menuText = `*🤖 WhatsApp Downloader Bot Menu*\n\n*1. .si [links]*\n> Inbox එකට ඩවුන්ලෝඩ් කරයි.\n\n*2. .sg [group name] [links]*\n> Group එකට යවයි.\n\n*3. .speed*\n> ඉන්ටර්නෙට් වේගය පෙන්වයි.`;
+            const menuText = `*🤖 RV Games Downloader Bot Menu*\n\n*1. .si [links]*\n> Inbox එකට ඩවුන්ලෝඩ් කරයි.\n\n*2. .sg [group name] [links]*\n> Group එකට යවයි.\n\n*3. .speed*\n> සර්වර් එකේ ඇත්තම වේගය මනියි.\n\n*4. .menu*\n> කමාන්ඩ් මෙනු එක පෙන්වයි.`;
             await sock.sendMessage(msg.key.remoteJid, { text: menuText }, { quoted: msg });
         }
     });
 
-    // 🔄 Connection හැසිරවීම (Loop වීම නවත්වන කොටස)
+    // 🔄 Connection හැසිරවීම
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             console.log(`⚠️ Connection closed. Status code: ${statusCode}`);
             
-            // 405 (Conflict) හෝ 401 (Logged Out) ආවොත් Session මකා දමා නතර කරයි
             if (statusCode === DisconnectReason.loggedOut || statusCode === 405) {
                 console.log('❌ Session එක Expire වෙලා! පැරණි දත්ත මකා දමයි.');
                 if (fs.existsSync(authFolder)) {
@@ -173,7 +201,7 @@ async function startBot() {
                 setTimeout(() => startBot(), 5000); 
             }
         } else if (connection === 'open') {
-            console.log('🎉 WhatsApp Bot successfully connected!');
+            console.log('🎉 RV Games WhatsApp Bot successfully connected!');
         }
     });
 }
