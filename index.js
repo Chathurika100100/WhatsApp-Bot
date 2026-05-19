@@ -3,20 +3,58 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeys
 import pino from 'pino';
 import speedTest from 'speedtest-net';
 import fs from 'fs';
+import path from 'path';
 import http from 'http'; 
 
-// 🌐 Railway එකට බොට් ක්‍රියාත්මක බව පෙන්වීමට සහ Restart වීම වැළැක්වීමට ඇති Web Server එක
+// 🌐 Railway එක crash වීම වැළැක්වීමට ඇති Web Server එක
 const server = http.createServer((req, res) => {
-    res.end('WhatsApp Bot is Online and Running Successfully!');
+    res.end('WhatsApp Bot is Online using Session ID!');
 });
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🌐 Web server is running on port ${PORT}`);
 });
 
+const authFolder = './bot_session';
+
+// 📂 Session ID එක කියවා creds.json ෆයිල් එක සාදන Function එක
+function restoreSession() {
+    const sessionId = process.env.SESSION_ID;
+    if (!sessionId) {
+        console.error("❌ ERROR: Railway Variables වල SESSION_ID එක ඇතුළත් කර නැත!");
+        process.exit(1);
+    }
+
+    // 🛑 පැරණි දත්ත තිබුනොත් මකා දමා අලුත්ම එක ගැනීමට සලස්වයි
+    if (fs.existsSync(authFolder)) {
+        fs.rmSync(authFolder, { recursive: true, force: true });
+    }
+    
+    fs.mkdirSync(authFolder, { recursive: true });
+    const credsPath = path.join(authFolder, 'creds.json');
+
+    try {
+        let base64String = sessionId;
+        if (sessionId.includes(';;;')) base64String = sessionId.split(';;;').pop();
+        else if (sessionId.includes('~')) base64String = sessionId.split('~').pop();
+        else if (sessionId.includes(':')) base64String = sessionId.split(':').pop();
+
+        const decrypted = Buffer.from(base64String, 'base64').toString('utf-8');
+        JSON.parse(decrypted); // JSON එක නිවැරදිදැයි පරීක්ෂා කිරීම
+        
+        fs.writeFileSync(credsPath, decrypted);
+        console.log("✅ SESSION_ID එක සාර්ථකව Restore කරන ලදී!");
+    } catch (err) {
+        console.error("❌ ERROR: ඔයා දීලා තියෙන SESSION_ID එක වැරදියි හෝ බිඳී ඇත!");
+        process.exit(1); 
+    }
+}
+
 async function startBot() {
-    // සෙෂන් එක සේව් වෙන්නේ 'bot_session' කියන ෆෝල්ඩර් එකේ
-    const { state, saveCreds } = await useMultiFileAuthState('bot_session');
+    // බොට් ස්ටාර්ට් වෙද්දීම සෙෂන් එක හදනවා
+    restoreSession();
+
+    const { state, saveCreds } = await useMultiFileAuthState(authFolder);
 
     const sock = makeWASocket({
         auth: state,
@@ -25,36 +63,15 @@ async function startBot() {
         browser: ['Ubuntu', 'Chrome', '22.04.4'] 
     });
 
-    // 🔑 Pairing Code ලබා ගැනීම (සම්පූර්ණයෙන්ම Variable එක හරහා)
-    if (!sock.authState.creds.registered) {
-        const phoneNumber = process.env.PHONE_NUMBER; 
-        
-        if (!phoneNumber) {
-            console.error("\n❌ ERROR: PHONE_NUMBER Variable එක Railway එකේ දාලා නැහැ! කරුණාකර ඒක එකතු කරන්න.\n");
-            process.exit(1);
-        }
-        
-        setTimeout(async () => {
-            try {
-                const code = await sock.requestPairingCode(phoneNumber.trim());
-                console.log(`\n=========================================================`);
-                console.log(`🔑 ඔයාගේ අලුත් PAIRING CODE එක: ${code}`);
-                console.log(`=========================================================\n`);
-            } catch (error) {
-                console.error('❌ Pairing code Error:', error.message);
-            }
-        }, 5000);
-    }
-
     sock.ev.on('creds.update', saveCreds);
 
-    // 📩 සියලුම Commands හැසිරවීම
+    // 📩 සියලුම Commands හැසිරවීම (.menu, .speed, .si, .sg)
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
         if (!msg.message) return;
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        if (!text.startsWith('.')) return; // හැම කcommand එකක්ම පටන් ගන්නේ තිතකින් (.)
+        if (!text.startsWith('.')) return; 
 
         const senderJid = msg.key.participant || msg.key.remoteJid; 
         const isGroup = msg.key.remoteJid.endsWith('@g.us');
@@ -157,7 +174,7 @@ async function startBot() {
         }
     });
 
-    // 🔄 Connection එක විසන්ධි වුවහොත් නැවත සම්බන්ධ කිරීම
+    // 🔄 Connection එක හැසිරවීම
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
@@ -167,12 +184,13 @@ async function startBot() {
             if (shouldReconnect) {
                 setTimeout(() => startBot(), 5000); 
             } else {
-                console.log('❌ Session එක ලොග් අවුට් වී ඇත. පැරණි දත්ත මකා නැවත ක්‍රියාත්මක වේ...');
-                fs.rmSync('./bot_session', { recursive: true, force: true });
-                setTimeout(() => startBot(), 5000);
+                console.log('❌ Session එක ලොග් අවුට් වී ඇත. පැරණි දත්ත මකා දමයි.');
+                if (fs.existsSync(authFolder)) {
+                    fs.rmSync(authFolder, { recursive: true, force: true });
+                }
             }
         } else if (connection === 'open') {
-            console.log('🎉 WhatsApp Bot successfully connected and fully functional!');
+            console.log('🎉 WhatsApp Bot successfully connected using Session ID!');
         }
     });
 }
