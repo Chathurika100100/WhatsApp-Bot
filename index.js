@@ -2,14 +2,60 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeys
 import 'dotenv/config';
 import axios from 'axios';
 import speedTest from 'speedtest-net';
+import fs from 'fs';
+import path from 'path';
+
+// 📂 Session ID එකෙන් ලොගින් ෆයිල්ස් ටික නැවත සකස් කරන Function එක
+function restoreSession() {
+    const sessionId = process.env.SESSION_ID;
+    if (!sessionId) {
+        console.error("ERROR: SESSION_ID is missing in Environment Variables!");
+        process.exit(1);
+    }
+
+    const authFolder = './auth_info_baileys';
+    
+    // ෆෝල්ඩර් එක නැත්නම් හදනවා
+    if (!fs.existsSync(authFolder)) {
+        fs.mkdirSync(authFolder, { recursive: true });
+    }
+
+    const credsPath = path.join(authFolder, 'creds.json');
+
+    // creds.json එක දැනටමත් නැත්නම් විතරක් Session ID එකෙන් හදනවා
+    if (!fs.existsSync(credsPath)) {
+        try {
+            console.log("Restoring session from SESSION_ID...");
+            
+            // සමහර බොට්ස් වල Session ID එක මැදට යනකම් විවිධ prefixes තියෙනවා (උදා: Session;;; හෝ BotName~)
+            // ඒ නිසා Base64 කොටස විතරක් වෙන් කරගන්නවා
+            let base64String = sessionId;
+            if (sessionId.includes(';;;')) base64String = sessionId.split(';;;').pop();
+            else if (sessionId.includes('~')) base64String = sessionId.split('~').pop();
+            else if (sessionId.includes(':')) base64String = sessionId.split(':').pop();
+
+            // Base64 Text එක සාමාන්‍ය JSON එකකට Decode කිරීම
+            const decrypted = Buffer.from(base64String, 'base64').toString('utf-8');
+            
+            // creds.json ෆයිල් එක ලෙස Save කිරීම
+            fs.writeFileSync(credsPath, decrypted);
+            console.log("✅ Session Credentials successfully restored!");
+        } catch (err) {
+            console.error("❌ Failed to decode SESSION_ID. Please check if your Session ID is valid.", err);
+            process.exit(1);
+        }
+    }
+}
 
 async function startBot() {
-    const sessionId = process.env.SESSION_ID;
+    // බොට් පටන් ගන්න කලින් Session එක restore කරගන්නවා
+    restoreSession();
+
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false
+        printQRInTerminal: false // සෙෂන් ID එක තියෙන නිසා QR පෙන්වන්න ඕන නෑ
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -18,34 +64,29 @@ async function startBot() {
         const msg = m.messages[0];
         if (!msg.message) return;
 
-        // මැසේජ් එකේ text එක ලබා ගැනීම
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        if (!text.startsWith('.')) return; // '.' වලින් පටන් ගන්නේ නැත්නම් අතහැර දමන්න
+        if (!text.startsWith('.')) return; 
 
-        const senderJid = msg.key.participant || msg.key.remoteJid; // කමාන්ඩ් එක දාපු කෙනාගේ JID එක
+        const senderJid = msg.key.participant || msg.key.remoteJid; 
         const isGroup = msg.key.remoteJid.endsWith('@g.us');
         
-        // URL හොයාගන්න Regex එක
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
 
-        // 1. .si Command එක (Inbox එකට යැවීම)
+        // 1. .si Command
         if (text.startsWith('.si ')) {
             if (urls.length === 0) {
                 return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර valid link එකක් ලබා දෙන්න. Ex: .si [link]' }, { quoted: msg });
             }
-
             await sock.sendMessage(msg.key.remoteJid, { text: '📥 Links ඩවුන්ලෝඩ් වෙමින් පවතී. කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
 
             for (let url of urls) {
                 try {
-                    // කෙලින්ම URL එක හරහා File එක යැවීම (RAM එක ඉතිරි කරගන්න)
                     await sock.sendMessage(senderJid, { 
                         document: { url: url }, 
                         mimetype: 'application/octet-stream', 
-                        fileName: 'downloaded_file' // ඔයාට ඕන නම් axios වලින් headers අරන් හරි නම ගන්නත් පුළුවන්
+                        fileName: 'downloaded_file' 
                     });
-                    
                     if (isGroup) {
                          await sock.sendMessage(msg.key.remoteJid, { text: '✅ ෆයිල් එක ඔයාගේ Inbox එකට එව්වා!' }, { quoted: msg });
                     }
@@ -55,13 +96,12 @@ async function startBot() {
             }
         }
 
-        // 2. .sg Command එක (Group එකට යැවීම)
+        // 2. .sg Command
         else if (text.startsWith('.sg ')) {
             if (urls.length === 0) {
                 return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර valid link එකක් ලබා දෙන්න. Ex: .sg Group Name [link]' }, { quoted: msg });
             }
 
-            // Command එකෙන් Links ටික අයින් කරලා ඉතිරි ටිකෙන් Group Name එක වෙන් කරගැනීම (Spaces තිබුණත් වැඩ කරයි)
             let groupName = text.replace('.sg ', '');
             urls.forEach(u => groupName = groupName.replace(u, ''));
             groupName = groupName.trim().toLowerCase();
@@ -73,7 +113,6 @@ async function startBot() {
             await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක හොයමින් පවතී...` });
 
             try {
-                // බොට් ඉන්න ඔක්කොම Groups වල විස්තර ගැනීම
                 const groups = await sock.groupFetchAllParticipating();
                 let targetGroupJid = null;
 
@@ -103,19 +142,18 @@ async function startBot() {
             }
         }
 
-        // 3. .speed Command එක
+        // 3. .speed Command
         else if (text.trim() === '.speed') {
             await sock.sendMessage(msg.key.remoteJid, { text: '🚀 Speed එක පරීක්ෂා කරමින් පවතී. තත්පර කිහිපයක් රැඳී සිටින්න...' }, { quoted: msg });
             
             const startPing = Date.now();
             try {
-                // Ping එක සහ Speed එක බැලීම
                 const speed = await speedTest({ acceptLicense: true, acceptGdpr: true });
                 const endPing = Date.now();
                 const pingTime = endPing - startPing;
 
-                const downloadSpeed = (speed.download.bandwidth / 125000).toFixed(2); // Mbps වලට හැරවීම
-                const uploadSpeed = (speed.upload.bandwidth / 125000).toFixed(2);     // Mbps වලට හැරවීම
+                const downloadSpeed = (speed.download.bandwidth / 125000).toFixed(2); 
+                const uploadSpeed = (speed.upload.bandwidth / 125000).toFixed(2);     
 
                 const speedText = `*⚡ Speed Test Results*\n\n` +
                                   `🏓 Ping: ${pingTime} ms\n` +
@@ -129,13 +167,13 @@ async function startBot() {
             }
         }
 
-        // 4. .menu Command එක
+        // 4. .menu Command
         else if (text.trim() === '.menu') {
             const menuText = `*🤖 WhatsApp Downloader Bot Menu*\n\n` +
                              `*1. .si [links]*\n` +
                              `> ලින්ක්ස් වලින් ෆයිල් ඩවුන්ලෝඩ් කරලා ඔයාගේ Inbox එකටම එවයි.\n\n` +
                              `*2. .sg [group name] [links]*\n` +
-                             `> අදාළ ලින්ක්ස් වලින් ෆයිල් ඩවුන්ලෝඩ් කරලා ඔයා කියන Group එකට යවයි. (Spaces තිබුණට කමක් නෑ)\n\n` +
+                             `> අදාළ ලින්ක්ස් වලින් ෆයිල් ඩවුන්ලෝඩ් කරලා ඔයා කියන Group එකට යවයි.\n\n` +
                              `*3. .speed*\n` +
                              `> බොට් ඉන්න Server එකේ Ping එක, Download/Upload වේගය පෙන්නයි.\n\n` +
                              `*4. .menu*\n` +
@@ -151,7 +189,7 @@ async function startBot() {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) startBot();
         } else if (connection === 'open') {
-            console.log('WhatsApp Bot is successfully connected!');
+            console.log('🎉 WhatsApp Bot is successfully connected and authenticated!');
         }
     });
 }
