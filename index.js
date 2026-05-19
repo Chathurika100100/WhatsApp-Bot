@@ -20,7 +20,7 @@ const authFolder = './bot_session';
 // 📂 Session ID Setup
 function setupSession() {
     const credsPath = path.join(authFolder, 'creds.json');
-    if (fs.existsSync(credsPath)) return console.log("📂 පැරණි සෙෂන් දත්ත සොයාගන්නා ලදී...");
+    if (fs.existsSync(credsPath)) return console.log("📂 පැරණි සෙෂන් දත්ත සොයාගන්නා ลදී...");
 
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
@@ -59,7 +59,9 @@ function getExtensionFromMime(mimeType) {
     const map = {
         'application/zip': '.zip',
         'application/x-zip-compressed': '.zip',
+        'application/x-rar-compressed': '.rar',
         'application/vnd.rar': '.rar',
+        'application/x-rar': '.rar',
         'application/pdf': '.pdf',
         'image/jpeg': '.jpg',
         'image/png': '.png',
@@ -74,41 +76,56 @@ function getExtensionFromMime(mimeType) {
 // 📥 Heavy Lift Downloader & Auto Content Displayer
 async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
     const chatJid = msg.key.remoteJid;
-    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...\n📎 ${url}` }, { quoted: msg });
+    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
     
     try {
         const response = await axios({
             url,
             method: 'GET',
-            responseType: 'stream'
+            responseType: 'stream',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
         });
 
-        // 📝 ඇත්තම ෆයිල් නම හොයාගැනීමේ වඩාත් සාර්ථක ක්‍රමය
         let fileName = '';
         const contentDisposition = response.headers['content-disposition'];
         const contentType = response.headers['content-type'] || 'application/octet-stream';
 
+        // 📝 1. Content-Disposition එකෙන් නම ගන්න උත්සාහ කිරීම (UTF-8 සහ සාමාන්‍ය ක්‍රම දෙකටම)
         if (contentDisposition) {
-            const match = contentDisposition.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;\r\n"']*)['"]?/i);
-            if (match && match[1]) {
-                fileName = decodeURIComponent(match[1].replace(/['"]/g, ''));
+            const utf8Match = contentDisposition.match(/filename\*=\s*UTF-8''([^;\r\n]*)/i);
+            if (utf8Match && utf8Match[1]) {
+                fileName = decodeURIComponent(utf8Match[1]);
+            } else {
+                const normalMatch = contentDisposition.match(/filename\s*=\s*["']?([^;\r\n"']*)["']?/i);
+                if (normalMatch && normalMatch[1]) {
+                    fileName = normalMatch[1];
+                }
             }
         }
 
+        // 📝 2. Header එකේ නැත්නම් URL එකෙන් පිරිසිදු කර නම ගැනීම
         if (!fileName) {
             try {
-                let pathName = path.basename(new URL(url).pathname);
-                if (pathName && pathName !== '/' && !pathName.includes('%') && pathName.length < 50) {
-                    fileName = pathName;
+                const cleanUrl = url.split('?')[0].split('#')[0];
+                let pathName = path.basename(cleanUrl);
+                if (pathName && pathName !== '/' && !pathName.includes('%')) {
+                    fileName = decodeURIComponent(pathName);
                 }
             } catch (e) {}
         }
 
-        // අමුතු දිග නම් (hashes) මඟහැරීම සහ නමක් නැත්නම් සාදාගැනීම
-        if (!fileName || fileName.length > 50) {
-            fileName = `RV_Games_File_${Math.floor(Math.random() * 1000)}`;
+        // 📝 3. නම පිරිසිදු කිරීම සහ දිග සීමාව වැඩි කිරීම (FitGirl වගේ දිග නම් වලට)
+        if (fileName) {
+            fileName = fileName.replace(/[/\\?%*:|"<>]/g, '-').trim(); 
         }
 
+        if (!fileName || fileName.length > 200) {
+            fileName = `RV_Games_File_${Math.floor(Math.random() * 10000)}`;
+        }
+
+        // Extension එක නැත්නම් Mime Type එකෙන් දා ගැනීම
         if (!fileName.includes('.')) {
             const ext = getExtensionFromMime(contentType);
             fileName += ext;
@@ -173,13 +190,13 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         });
         
         clearInterval(uploadInterval);
-        fs.unlinkSync(tempFilePath); 
+        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); 
 
         await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථකව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
 
     } catch (error) {
         console.error(error);
-        await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ෆයිල් එක ලබා ගැනීමට නොහැකි විය.\n📎 ${url}`, edit: progressMsg.key }).catch(() => {});
+        await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ෆයිල් එක ලබා ගැනීමට නොහැකි විය.`, edit: progressMsg.key }).catch(() => {});
     }
 }
 
@@ -213,8 +230,6 @@ async function startBot() {
         // 1️⃣ .si Command (Multiple Links Supported)
         if (text.startsWith('.si ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
-            
-            // ලින්ක් කීපයක් තිබුණොත් එකින් එක යවයි
             for (let url of urls) {
                 await handleDownloadAndUpload(url, sock, msg, senderJid);
             }
@@ -224,12 +239,11 @@ async function startBot() {
         else if (text.startsWith('.sg ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
 
-            // ලින්ක් ටික අයින් කරලා ගෲප් එකේ නම වෙන් කරගැනීම
             let groupName = text.replace('.sg ', '');
             urls.forEach(u => groupName = groupName.replace(u, ''));
             groupName = groupName.trim().toLowerCase();
 
-            if (!groupName) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර ගෲප් එකේ නම සඳහන් කරන්න. (උදා: .sg MyGroup https://...)' }, { quoted: msg });
+            if (!groupName) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර ගෲප් එකේ නම සඳහන් කරන්න.' }, { quoted: msg });
             await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක සොයමින් පවතී...` });
 
             try {
@@ -244,7 +258,6 @@ async function startBot() {
 
                 if (!targetGroupJid) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ ඒ නමින් ගෲප් එකක් සොයාගත නොහැකි විය.' });
                 
-                // ලින්ක් කීපයක් තිබුණොත් එකින් එක ගෲප් එකට යවයි
                 for (let url of urls) {
                     await handleDownloadAndUpload(url, sock, msg, targetGroupJid);
                 }
@@ -263,7 +276,7 @@ async function startBot() {
                 const pingTime = Date.now() - pingStart;
 
                 const dlStart = Date.now();
-                const dlResponse = await fetch('https://httpbin.org/bytes/1048576'); // 1MB 
+                const dlResponse = await fetch('https://httpbin.org/bytes/1048576'); 
                 const fileBuffer = await dlResponse.arrayBuffer();
                 const dlEnd = Date.now();
                 
