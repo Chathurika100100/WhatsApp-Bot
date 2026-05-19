@@ -1,7 +1,7 @@
 {
   "name": "rv-games-bot",
-  "version": "1.0.0",
-  "description": "WhatsApp Downloader Bot for RV Games",
+  "version": "1.1.0",
+  "description": "Premium WhatsApp Downloader Bot for RV Games",
   "main": "index.js",
   "type": "module",
   "scripts": {
