@@ -59,6 +59,7 @@ function getExtensionFromMime(mimeType) {
     const map = {
         'application/zip': '.zip',
         'application/x-zip-compressed': '.zip',
+        'application/vnd.rar': '.rar',
         'application/pdf': '.pdf',
         'image/jpeg': '.jpg',
         'image/png': '.png',
@@ -73,7 +74,7 @@ function getExtensionFromMime(mimeType) {
 // 📥 Heavy Lift Downloader & Auto Content Displayer
 async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
     const chatJid = msg.key.remoteJid;
-    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
+    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...\n📎 ${url}` }, { quoted: msg });
     
     try {
         const response = await axios({
@@ -82,21 +83,35 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             responseType: 'stream'
         });
 
-        // 📝 ඇත්තම ෆයිල් නම සහ Extension එක හොයාගැනීම
+        // 📝 ඇත්තම ෆයිල් නම හොයාගැනීමේ වඩාත් සාර්ථක ක්‍රමය
         let fileName = '';
         const contentDisposition = response.headers['content-disposition'];
         const contentType = response.headers['content-type'] || 'application/octet-stream';
 
-        if (contentDisposition && contentDisposition.includes('filename=')) {
-            fileName = contentDisposition.split('filename=')[1].replace(/["']/g, '');
-        } else {
-            fileName = path.basename(new URL(url).pathname);
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;\r\n"']*)['"]?/i);
+            if (match && match[1]) {
+                fileName = decodeURIComponent(match[1].replace(/['"]/g, ''));
+            }
         }
 
-        // නමක් නැත්නම් හෝ Extension එකක් නැත්නම් සකස් කිරීම
-        if (!fileName || fileName === '/' || !fileName.includes('.')) {
+        if (!fileName) {
+            try {
+                let pathName = path.basename(new URL(url).pathname);
+                if (pathName && pathName !== '/' && !pathName.includes('%') && pathName.length < 50) {
+                    fileName = pathName;
+                }
+            } catch (e) {}
+        }
+
+        // අමුතු දිග නම් (hashes) මඟහැරීම සහ නමක් නැත්නම් සාදාගැනීම
+        if (!fileName || fileName.length > 50) {
+            fileName = `RV_Games_File_${Math.floor(Math.random() * 1000)}`;
+        }
+
+        if (!fileName.includes('.')) {
             const ext = getExtensionFromMime(contentType);
-            fileName = fileName && fileName !== '/' ? fileName + ext : `File_${Date.now()}${ext}`;
+            fileName += ext;
         }
 
         const totalLength = parseInt(response.headers['content-length'], 10) || 0;
@@ -132,7 +147,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             writer.on('error', reject);
         });
 
-        // --- 2. 📤 UPLOADING PHASE (SIMULATION OVER REAL FILE SEND) ---
+        // --- 2. 📤 UPLOADING PHASE ---
         let uploadPercent = 0;
         const totalMB = (totalLength / (1024 * 1024)).toFixed(1);
 
@@ -149,23 +164,22 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             }
         }, 1500);
 
-        // 🚀 WhatsApp එකට ඇත්තටම ෆයිල් එක යැවීම සහ Caption එක එකතු කිරීම
+        // 🚀 WhatsApp එකට යැවීම
         await sock.sendMessage(sendToJid, { 
             document: { url: tempFilePath }, 
             mimetype: contentType, 
             fileName: fileName,
-            caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*` // 👈 ඔයා ඉල්ලපු කැප්ෂන් එක
+            caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`
         });
         
         clearInterval(uploadInterval);
-        fs.unlinkSync(tempFilePath); // ඉඩ ඉතුරු කරගැනීමට මැකීම
+        fs.unlinkSync(tempFilePath); 
 
-        // සාර්ථක පණිවිඩය
         await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථකව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
 
     } catch (error) {
         console.error(error);
-        await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ෆයිල් එක ලබා ගැනීමට නොහැකි විය.`, edit: progressMsg.key }).catch(() => {});
+        await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ෆයිල් එක ලබා ගැනීමට නොහැකි විය.\n📎 ${url}`, edit: progressMsg.key }).catch(() => {});
     }
 }
 
@@ -192,28 +206,30 @@ async function startBot() {
         if (!text.startsWith('.')) return; 
 
         const senderJid = msg.key.participant || msg.key.remoteJid; 
-        const isGroup = msg.key.remoteJid.endsWith('@g.us');
         
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
 
-        // 1️⃣ .si Command
+        // 1️⃣ .si Command (Multiple Links Supported)
         if (text.startsWith('.si ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
+            
+            // ලින්ක් කීපයක් තිබුණොත් එකින් එක යවයි
             for (let url of urls) {
                 await handleDownloadAndUpload(url, sock, msg, senderJid);
             }
         }
 
-        // 2️⃣ .sg Command
+        // 2️⃣ .sg Command (Multiple Links Supported)
         else if (text.startsWith('.sg ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
 
+            // ලින්ක් ටික අයින් කරලා ගෲප් එකේ නම වෙන් කරගැනීම
             let groupName = text.replace('.sg ', '');
             urls.forEach(u => groupName = groupName.replace(u, ''));
             groupName = groupName.trim().toLowerCase();
 
-            if (!groupName) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර ගෲප් එකේ නම සඳහන් කරන්න.' }, { quoted: msg });
+            if (!groupName) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර ගෲප් එකේ නම සඳහන් කරන්න. (උදා: .sg MyGroup https://...)' }, { quoted: msg });
             await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක සොයමින් පවතී...` });
 
             try {
@@ -228,6 +244,7 @@ async function startBot() {
 
                 if (!targetGroupJid) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ ඒ නමින් ගෲප් එකක් සොයාගත නොහැකි විය.' });
                 
+                // ලින්ක් කීපයක් තිබුණොත් එකින් එක ගෲප් එකට යවයි
                 for (let url of urls) {
                     await handleDownloadAndUpload(url, sock, msg, targetGroupJid);
                 }
@@ -246,7 +263,7 @@ async function startBot() {
                 const pingTime = Date.now() - pingStart;
 
                 const dlStart = Date.now();
-                const dlResponse = await fetch('https://httpbin.org/bytes/1048576');
+                const dlResponse = await fetch('https://httpbin.org/bytes/1048576'); // 1MB 
                 const fileBuffer = await dlResponse.arrayBuffer();
                 const dlEnd = Date.now();
                 
@@ -272,18 +289,18 @@ async function startBot() {
             }
         }
 
-        // 4️⃣ .menu Command (Lassana Emojis & Borders Added ✨)
+        // 4️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
                 `👑 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
                 `╔════════════════════╗\n` +
                 `┃   🤖 *MAIN COMMANDS MENU* \n` +
                 `╚════════════════════╝\n` +
-                `┃ 📥 *.si [link]*\n` +
-                `┃ ↳ _ඩොකියුමන්ට් එක කෙලින්ම Inbox එවයි._\n` +
+                `┃ 📥 *.si [link 1] [link 2]*\n` +
+                `┃ ↳ _ලින්ක් කීපයක් වුවද එකවර Inbox එවයි._\n` +
                 `┃\n` +
-                `┃ 👥 *.sg [group_name] [link]*\n` +
-                `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල් එක යවයි._\n` +
+                `┃ 👥 *.sg [group name] [link 1] [link 2]*\n` +
+                `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල්ස් යවයි._\n` +
                 `┃\n` +
                 `┃ ⚡ *.speed*\n` +
                 `┃ ↳ _සර්වර් එකේ සැබෑ DL/UL වේගය මනියි._\n` +
