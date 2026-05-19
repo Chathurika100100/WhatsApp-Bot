@@ -1,14 +1,17 @@
 {
-  "name": "whatsapp-sg-downloader",
+  "name": "whatsapp-railway-bot",
   "version": "1.0.0",
-  "description": "WhatsApp Link Downloader Bot",
+  "description": "WhatsApp Downloader Bot",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
+    "@whiskeysockets/baileys": "^latest",
+    "qrcode-terminal": "^0.12.0",
+    "dotenv": "^16.4.5",
     "axios": "^1.6.8",
-    "pino": "^8.19.0"
+    "speedtest-net": "^2.2.0"
   }
 }
