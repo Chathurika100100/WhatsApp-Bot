@@ -20,7 +20,7 @@ const authFolder = './bot_session';
 // 📂 Session ID Setup
 function setupSession() {
     const credsPath = path.join(authFolder, 'creds.json');
-    if (fs.existsSync(credsPath)) return console.log("📂 පැරණි සෙෂන් දත්ත සොයාගන්නා ลදී...");
+    if (fs.existsSync(credsPath)) return console.log("📂 පැරණි සෙෂන් දත්ත සොයාගන්නා ලදී...");
 
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
@@ -92,7 +92,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         const contentDisposition = response.headers['content-disposition'];
         const contentType = response.headers['content-type'] || 'application/octet-stream';
 
-        // 📝 1. Content-Disposition එකෙන් නම ගන්න උත්සාහ කිරීම (UTF-8 සහ සාමාන්‍ය ක්‍රම දෙකටම)
         if (contentDisposition) {
             const utf8Match = contentDisposition.match(/filename\*=\s*UTF-8''([^;\r\n]*)/i);
             if (utf8Match && utf8Match[1]) {
@@ -105,7 +104,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             }
         }
 
-        // 📝 2. Header එකේ නැත්නම් URL එකෙන් පිරිසිදු කර නම ගැනීම
         if (!fileName) {
             try {
                 const cleanUrl = url.split('?')[0].split('#')[0];
@@ -116,7 +114,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             } catch (e) {}
         }
 
-        // 📝 3. නම පිරිසිදු කිරීම සහ දිග සීමාව වැඩි කිරීම (FitGirl වගේ දිග නම් වලට)
         if (fileName) {
             fileName = fileName.replace(/[/\\?%*:|"<>]/g, '-').trim(); 
         }
@@ -125,7 +122,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             fileName = `RV_Games_File_${Math.floor(Math.random() * 10000)}`;
         }
 
-        // Extension එක නැත්නම් Mime Type එකෙන් දා ගැනීම
         if (!fileName.includes('.')) {
             const ext = getExtensionFromMime(contentType);
             fileName += ext;
@@ -193,10 +189,12 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); 
 
         await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථකව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
+        return true; // සාර්ථකයි නම් true රිටන් කරයි
 
     } catch (error) {
         console.error(error);
         await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ෆයිල් එක ලබා ගැනීමට නොහැකි විය.`, edit: progressMsg.key }).catch(() => {});
+        return false;
     }
 }
 
@@ -227,7 +225,7 @@ async function startBot() {
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
 
-        // 1️⃣ .si Command (Multiple Links Supported)
+        // 1️⃣ .si Command 
         if (text.startsWith('.si ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
             for (let url of urls) {
@@ -235,7 +233,7 @@ async function startBot() {
             }
         }
 
-        // 2️⃣ .sg Command (Multiple Links Supported)
+        // 2️⃣ .sg Command (Group Upload + Auto End Summary Report)
         else if (text.startsWith('.sg ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
 
@@ -244,7 +242,7 @@ async function startBot() {
             groupName = groupName.trim().toLowerCase();
 
             if (!groupName) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර ගෲප් එකේ නම සඳහන් කරන්න.' }, { quoted: msg });
-            await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක සොයමින් පවතී...` });
+            const initialNotify = await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක සොයමින් පවතී...` });
 
             try {
                 const groups = await sock.groupFetchAllParticipating();
@@ -258,9 +256,35 @@ async function startBot() {
 
                 if (!targetGroupJid) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ ඒ නමින් ගෲප් එකක් සොයාගත නොහැකි විය.' });
                 
+                // ⏱️ මුළු ක්‍රියාවලියටම යන වෙලාව මැනීම ආරම්භය
+                const startTime = Date.now();
+                let uploadedCount = 0;
+
                 for (let url of urls) {
-                    await handleDownloadAndUpload(url, sock, msg, targetGroupJid);
+                    const success = await handleDownloadAndUpload(url, sock, msg, targetGroupJid);
+                    if (success) uploadedCount++;
                 }
+
+                const endTime = Date.now();
+                const totalTimeSeconds = ((endTime - startTime) / 1000).toFixed(1);
+
+                // 📊 ඔයා ඉල්ලපු ලස්සන Done Summary Message එක ගෲප් එකටම යැවීම 
+                if (uploadedCount > 0) {
+                    const summaryText = 
+                        `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
+                        `      ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                        `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
+                        `┌────────────────────────\n` +
+                        `│ ✅ Status: Done\n` +
+                        `│ 📦 Total Parts: ${uploadedCount}\n` +
+                        `│ ⏱️ Time Taken: ${totalTimeSeconds}s\n` +
+                        `└────────────────────────\n\n` +
+                        `𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games`;
+
+                    await sock.sendMessage(targetGroupJid, { text: summaryText });
+                    await sock.sendMessage(msg.key.remoteJid, { text: `✅ සියලුම Parts (${uploadedCount}) ගෲප් එකට සාර්ථකව යවා Summary වාර්තාවද ලබා දෙන ලදී!`, edit: initialNotify.key });
+                }
+
             } catch (error) {
                 await sock.sendMessage(msg.key.remoteJid, { text: '❌ ගෲප් එකට යැවීමේදී දෝෂයක් ඇති විය.' });
             }
@@ -313,7 +337,7 @@ async function startBot() {
                 `┃ ↳ _ලින්ක් කීපයක් වුවද එකවර Inbox එවයි._\n` +
                 `┃\n` +
                 `┃ 👥 *.sg [group name] [link 1] [link 2]*\n` +
-                `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල්ස් යවයි._\n` +
+                `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල්ස් සහ Summary වාර්තාව යවයි._\n` +
                 `┃\n` +
                 `┃ ⚡ *.speed*\n` +
                 `┃ ↳ _සර්වර් එකේ සැබෑ DL/UL වේගය මනියි._\n` +
