@@ -2,33 +2,42 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeys
 import pino from 'pino';
 import speedTest from 'speedtest-net';
 import fs from 'fs';
+import http from 'http'; // අලුතින් එකතු කළා
+
+// 🌐 Railway එකට බොට් ක්‍රියාත්මක බව පෙන්වීමට පොඩි Server එකක්
+const server = http.createServer((req, res) => {
+    res.end('WhatsApp Bot is Online and Running!');
+});
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`🌐 Web server is running on port ${PORT}`);
+});
 
 async function startBot() {
-    // පැරණි දෝෂ සහිත ෆෝල්ඩර් මඟහැරලා, සම්පූර්ණයෙන්ම අලුත් සෙෂන් ෆෝල්ඩර් එකක් භාවිත කිරීම ('bot_session')
     const { state, saveCreds } = await useMultiFileAuthState('bot_session');
 
     const sock = makeWASocket({
         auth: state,
         printQRInTerminal: false,
-        logger: pino({ level: 'silent' }), // අනවශ්‍ය ලොග් මැකීම
+        logger: pino({ level: 'silent' }), 
         browser: ['Ubuntu', 'Chrome', '22.04.4'] 
     });
 
-    // 🔑 Pairing Code ඉල්ලීම (සෙෂන් එකක් නැත්නම් පමණක්)
+    // 🔑 Pairing Code ඉල්ලීම
     if (!sock.authState.creds.registered) {
         const phoneNumber = "94726046800"; // ඔයාගේ WhatsApp අංකය
         
+        // තත්පර 5ක් ඉඳලා එක පාරක් විතරක් කෝඩ් එක ගන්නවා
         setTimeout(async () => {
             try {
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`\n=========================================================`);
-                console.log(`🔑 ඔයාගේ PAIRING CODE එක: ${code}`);
-                console.log(`ඔයාගේ WhatsApp එකේ 'Linked Devices -> Link with phone number' ගිහින් මේ කෝඩ් එක ගහන්න.`);
+                console.log(`🔑 ඔයාගේ අලුත් PAIRING CODE එක: ${code}`);
                 console.log(`=========================================================\n`);
             } catch (error) {
-                console.error('❌ Pairing code එක ගැනීමේදී දෝෂයක් ආවා:', error.message);
+                console.error('❌ Pairing code Error:', error.message);
             }
-        }, 3000);
+        }, 5000);
     }
 
     sock.ev.on('creds.update', saveCreds);
@@ -127,7 +136,7 @@ async function startBot() {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log(`⚠️ Connection closed. Reconnecting: ${shouldReconnect}`);
+            console.log(`⚠️ Connection closed. Reconnecting...`);
             
             if (shouldReconnect) {
                 setTimeout(() => startBot(), 5000); 
