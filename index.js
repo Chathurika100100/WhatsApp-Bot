@@ -19,19 +19,21 @@ const authFolder = './bot_session';
 
 // 📂 Session ID එක කියවා creds.json ෆයිල් එක සාදන Function එක
 function restoreSession() {
+    const credsPath = path.join(authFolder, 'creds.json');
+
+    // 🎯 FIX: දැනටමත් creds.json එක තියෙනවා නම් ඒක මකන්න යන්නේ නැහැ. පවතින එකෙන්ම දුවනවා.
+    if (fs.existsSync(credsPath)) {
+        console.log("📂 දැනටමත් පවතින සෙෂන් දත්ත (creds.json) භාවිතා කරයි...");
+        return;
+    }
+
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
         console.error("❌ ERROR: Railway Variables වල SESSION_ID එක ඇතුළත් කර නැත!");
         process.exit(1);
     }
-
-    // 🛑 පැරණි දත්ත තිබුනොත් මකා දමා අලුත්ම එක ගැනීමට සලස්වයි
-    if (fs.existsSync(authFolder)) {
-        fs.rmSync(authFolder, { recursive: true, force: true });
-    }
     
     fs.mkdirSync(authFolder, { recursive: true });
-    const credsPath = path.join(authFolder, 'creds.json');
 
     try {
         let base64String = sessionId;
@@ -43,7 +45,7 @@ function restoreSession() {
         JSON.parse(decrypted); // JSON එක නිවැරදිදැයි පරීක්ෂා කිරීම
         
         fs.writeFileSync(credsPath, decrypted);
-        console.log("✅ SESSION_ID එක සාර්ථකව Restore කරන ලදී!");
+        console.log("✅ SESSION_ID එක සාර්ථකව පළමු වරට Restore කරන ලදී!");
     } catch (err) {
         console.error("❌ ERROR: ඔයා දීලා තියෙන SESSION_ID එක වැරදියි හෝ බිඳී ඇත!");
         process.exit(1); 
@@ -51,7 +53,7 @@ function restoreSession() {
 }
 
 async function startBot() {
-    // බොට් ස්ටාර්ට් වෙද්දීම සෙෂන් එක හදනවා
+    // බොට් ස්ටාර්ට් වෙද්දී පමණක් සෙෂන් එක චෙක් කරයි
     restoreSession();
 
     const { state, saveCreds } = await useMultiFileAuthState(authFolder);
@@ -184,10 +186,11 @@ async function startBot() {
             if (shouldReconnect) {
                 setTimeout(() => startBot(), 5000); 
             } else {
-                console.log('❌ Session එක ලොග් අවුට් වී ඇත. පැරණි දත්ත මකා දමයි.');
+                console.log('❌ Session එක ලොග් අවුට් වී ඇත. පැරණි දත්ත මකා දමයි. කරුණාකර අලුත් SESSION_ID එකක් දමන්න.');
                 if (fs.existsSync(authFolder)) {
                     fs.rmSync(authFolder, { recursive: true, force: true });
                 }
+                process.exit(1); // ලොග් අවුට් වුවහොත් ලූප් නොවී ක්‍රියාවලිය නවත්වයි
             }
         } else if (connection === 'open') {
             console.log('🎉 WhatsApp Bot successfully connected using Session ID!');
