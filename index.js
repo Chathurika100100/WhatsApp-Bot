@@ -4,8 +4,9 @@ import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
 import http from 'http'; 
+import axios from 'axios'; 
 
-// 🌐 Railway එක crash වීම වැළැක්වීමට ඇති Web Server එක
+// 🌐 Railway Crash වීම වැළැක්වීමට ඇති Web Server එක
 const server = http.createServer((req, res) => {
     res.end('RV Games WhatsApp Bot is Online!');
 });
@@ -16,14 +17,10 @@ server.listen(PORT, () => {
 
 const authFolder = './bot_session';
 
-// 📂 Session ID එක කියවා creds.json ෆයිල් එක සාදන Function එක
+// 📂 Session ID Setup කිරීම
 function setupSession() {
     const credsPath = path.join(authFolder, 'creds.json');
-
-    if (fs.existsSync(credsPath)) {
-        console.log("📂 දැනටමත් පවතින සෙෂන් දත්ත භාවිතා කරයි...");
-        return;
-    }
+    if (fs.existsSync(credsPath)) return console.log("📂 දැනටමත් පවතින සෙෂන් දත්ත භාවිතා කරයි...");
 
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
@@ -32,7 +29,6 @@ function setupSession() {
     }
     
     fs.mkdirSync(authFolder, { recursive: true });
-
     try {
         let base64String = sessionId;
         if (sessionId.includes(';;;')) base64String = sessionId.split(';;;').pop();
@@ -40,18 +36,95 @@ function setupSession() {
         else if (sessionId.includes(':')) base64String = sessionId.split(':').pop();
 
         const decrypted = Buffer.from(base64String, 'base64').toString('utf-8');
-        JSON.parse(decrypted); // JSON දැයි පරීක්ෂා කිරීම
-        
+        JSON.parse(decrypted); 
         fs.writeFileSync(credsPath, decrypted);
         console.log("✅ SESSION_ID එක සාර්ථකව Restore කරන ලදී!");
     } catch (err) {
-        console.error("❌ ERROR: SESSION_ID එක වැරදියි හෝ බිඳී ඇත!");
+        console.error("❌ ERROR: SESSION_ID දෝෂ සහිතයි!");
         process.exit(1); 
     }
 }
-
-// Bot run වෙන්න කලින් Session එක හදලා ඉවර කරනවා
 setupSession();
+
+// 📊 Progress Bar Generator
+function getProgressBar(percent) {
+    const total = 10;
+    const filled = Math.round((percent / 100) * total);
+    const empty = total - filled;
+    return '▰'.repeat(filled) + '▱'.repeat(empty);
+}
+
+// 📥 Live Progress Download සහ Upload Function එක
+async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
+    const chatJid = msg.key.remoteJid;
+    const progressMsg = await sock.sendMessage(chatJid, { text: `🔄 ලින්ක් එකට සම්බන්ධ වෙමින් පවතී...` }, { quoted: msg });
+    
+    try {
+        const response = await axios({
+            url,
+            method: 'GET',
+            responseType: 'stream'
+        });
+
+        // 📝 ඔරිජිනල් ෆයිල් නම සොයාගැනීම
+        let fileName = 'RV_Games_File';
+        const contentDisposition = response.headers['content-disposition'];
+        if (contentDisposition && contentDisposition.includes('filename=')) {
+            fileName = contentDisposition.split('filename=')[1].replace(/["']/g, '');
+        } else {
+            const urlName = path.basename(new URL(url).pathname);
+            if (urlName && urlName.includes('.')) fileName = urlName;
+        }
+
+        const totalLength = parseInt(response.headers['content-length'], 10);
+        const contentType = response.headers['content-type'] || 'application/octet-stream';
+        let downloadedLength = 0;
+        let lastUpdateTime = Date.now();
+
+        const tempFilePath = path.join('./', `${Date.now()}_${fileName}`);
+        const writer = fs.createWriteStream(tempFilePath);
+
+        response.data.on('data', async (chunk) => {
+            downloadedLength += chunk.length;
+            if (totalLength) {
+                const percent = ((downloadedLength / totalLength) * 100).toFixed(1);
+                const now = Date.now();
+                
+                // තත්පර 2කට වරක් මැසේජ් එක Edit කරයි
+                if (now - lastUpdateTime > 2000) { 
+                    lastUpdateTime = now;
+                    const dlMB = (downloadedLength / (1024 * 1024)).toFixed(1);
+                    const totMB = (totalLength / (1024 * 1024)).toFixed(1);
+                    const bar = getProgressBar(percent);
+                    const text = `📥 *Downloading:* ${fileName}\n📊 ${bar} ${percent}%\n📦 ${dlMB}MB / ${totMB}MB`;
+                    
+                    await sock.sendMessage(chatJid, { text: text, edit: progressMsg.key }).catch(() => {});
+                }
+            }
+        });
+
+        response.data.pipe(writer);
+
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+
+        await sock.sendMessage(chatJid, { text: `✅ *${fileName}* බාගත කළා!\n📤 දැන් WhatsApp වෙත යවමින් පවතී... ⏳`, edit: progressMsg.key }).catch(() => {});
+
+        // ෆයිල් එක යැවීම
+        await sock.sendMessage(sendToJid, { document: { url: tempFilePath }, mimetype: contentType, fileName: fileName });
+        
+        // Temporary ෆයිල් එක මැකීම
+        fs.unlinkSync(tempFilePath);
+
+        await sock.sendMessage(chatJid, { text: `✅ *${fileName}* සාර්ථකව යවන ලදී! 🎉`, edit: progressMsg.key }).catch(() => {});
+
+    } catch (error) {
+        console.error(error);
+        await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ලින්ක් එකෙන් ෆයිල් එක ගන්න බැරි වුණා. (${url})`, edit: progressMsg.key }).catch(() => {});
+    }
+}
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState(authFolder);
@@ -68,7 +141,6 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // 📩 Commands හැසිරවීම (.menu, .speed, .si, .sg)
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
         if (!msg.message) return;
@@ -85,15 +157,8 @@ async function startBot() {
         // 1️⃣ .si Command
         if (text.startsWith('.si ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර valid link එකක් ලබා දෙන්න. Ex: .si [link]' }, { quoted: msg });
-            await sock.sendMessage(msg.key.remoteJid, { text: '📥 ලින්ක්ස් ඩවුන්ලෝඩ් වෙමින් පවතී. කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
-
             for (let url of urls) {
-                try {
-                    await sock.sendMessage(senderJid, { document: { url: url }, mimetype: 'application/octet-stream', fileName: 'downloaded_file' });
-                    if (isGroup) await sock.sendMessage(msg.key.remoteJid, { text: '✅ ෆයිල් එක ඔයාගේ Inbox එකට එව්වා!' }, { quoted: msg });
-                } catch (error) {
-                    await sock.sendMessage(msg.key.remoteJid, { text: `❌ මේ ලින්ක් එකෙන් ෆයිල් එක ගන්න බැරි වුණා: ${url}` }, { quoted: msg });
-                }
+                await handleDownloadAndUpload(url, sock, msg, senderJid);
             }
         }
 
@@ -119,10 +184,9 @@ async function startBot() {
                 }
 
                 if (!targetGroupJid) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ ඒ නමින් Group එකක් හොයාගන්න බැරි වුණා.' });
-                await sock.sendMessage(msg.key.remoteJid, { text: `✅ Group එක හොයාගත්තා. ෆයිල්ස් යවමින් පවතී...` });
-
+                
                 for (let url of urls) {
-                    await sock.sendMessage(targetGroupJid, { document: { url: url }, mimetype: 'application/octet-stream', fileName: 'group_downloaded_file' });
+                    await handleDownloadAndUpload(url, sock, msg, targetGroupJid);
                 }
             } catch (error) {
                 await sock.sendMessage(msg.key.remoteJid, { text: '❌ Group එකට යවනකොට දෝෂයක් ආවා.' });
@@ -134,12 +198,10 @@ async function startBot() {
             await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී. කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
             
             try {
-                // 1. Ping පරීක්ෂා කිරීම
                 const pingStart = Date.now();
                 await fetch('https://httpbin.org/ping');
                 const pingTime = Date.now() - pingStart;
 
-                // 2. Download Speed පරීක්ෂා කිරීම (1MB)
                 const dlStart = Date.now();
                 const dlResponse = await fetch('https://httpbin.org/bytes/1048576');
                 if (!dlResponse.ok) throw new Error('Download failed');
@@ -149,7 +211,6 @@ async function startBot() {
                 const dlDuration = (dlEnd - dlStart) / 1000;
                 const downloadSpeed = (8 / dlDuration).toFixed(2);
 
-                // 3. Upload Speed පරීක්ෂා කිරීම (1MB)
                 const ulStart = Date.now();
                 const ulResponse = await fetch('https://httpbin.org/post', {
                     method: 'POST',
@@ -161,7 +222,6 @@ async function startBot() {
                 const ulDuration = (ulEnd - ulStart) / 1000;
                 const uploadSpeed = (8 / ulDuration).toFixed(2);
 
-                // ප්‍රතිඵල සැකසීම (යටින් තිබුණු සටහන ඉවත් කර ඇත)
                 const speedText = `*⚡ RV Games Speed Test*\n\n` +
                                   `🏓 *Ping:* ${pingTime} ms\n` +
                                   `📥 *Download Speed:* ${downloadSpeed} Mbps\n` +
@@ -170,7 +230,6 @@ async function startBot() {
                 await sock.sendMessage(msg.key.remoteJid, { text: speedText }, { quoted: msg });
 
             } catch (error) {
-                console.error(error);
                 await sock.sendMessage(msg.key.remoteJid, { text: '❌ Speed test එක කරද්දී පොඩි අවුලක් ආවා. නැවත උත්සාහ කරන්න.' }, { quoted: msg });
             }
         }
@@ -182,7 +241,6 @@ async function startBot() {
         }
     });
 
-    // 🔄 Connection හැසිරවීම
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
@@ -191,10 +249,7 @@ async function startBot() {
             
             if (statusCode === DisconnectReason.loggedOut || statusCode === 405) {
                 console.log('❌ Session එක Expire වෙලා! පැරණි දත්ත මකා දමයි.');
-                if (fs.existsSync(authFolder)) {
-                    fs.rmSync(authFolder, { recursive: true, force: true });
-                }
-                console.log('කරුණාකර අලුත් SESSION_ID එකක් Railway Variables වලට ඇතුළත් කරන්න.');
+                if (fs.existsSync(authFolder)) fs.rmSync(authFolder, { recursive: true, force: true });
                 process.exit(1); 
             } else {
                 console.log('🔄 Reconnecting in 5 seconds...');
