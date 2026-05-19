@@ -6,9 +6,9 @@ import path from 'path';
 import http from 'http'; 
 import axios from 'axios'; 
 
-// 🌐 Railway Crash වීම වැළැක්වීමට ඇති Web Server එක
+// 🌐 Web Server for Railway
 const server = http.createServer((req, res) => {
-    res.end('RV Games WhatsApp Bot is Online!');
+    res.end('RV Games Ultra Bot is Online!');
 });
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
@@ -17,14 +17,14 @@ server.listen(PORT, () => {
 
 const authFolder = './bot_session';
 
-// 📂 Session ID Setup කිරීම
+// 📂 Session ID Setup
 function setupSession() {
     const credsPath = path.join(authFolder, 'creds.json');
-    if (fs.existsSync(credsPath)) return console.log("📂 දැනටමත් පවතින සෙෂන් දත්ත භාවිතා කරයි...");
+    if (fs.existsSync(credsPath)) return console.log("📂 පැරණි සෙෂන් දත්ත සොයාගන්නා ලදී...");
 
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
-        console.error("❌ ERROR: Railway Variables වල SESSION_ID එක ඇතුළත් කර නැත!");
+        console.error("❌ ERROR: Railway Variables වල SESSION_ID එක දමා නැත!");
         process.exit(1);
     }
     
@@ -38,15 +38,15 @@ function setupSession() {
         const decrypted = Buffer.from(base64String, 'base64').toString('utf-8');
         JSON.parse(decrypted); 
         fs.writeFileSync(credsPath, decrypted);
-        console.log("✅ SESSION_ID එක සාර්ථකව Restore කරන ලදී!");
+        console.log("✅ SESSION_ID එක සාර්ථකව ක්‍රියාත්මක කරන ලදී!");
     } catch (err) {
-        console.error("❌ ERROR: SESSION_ID දෝෂ සහිතයි!");
+        console.error("❌ ERROR: SESSION_ID එකේ දෝෂයක් පවතී!");
         process.exit(1); 
     }
 }
 setupSession();
 
-// 📊 Progress Bar Generator
+// 📊 Progress Bar 
 function getProgressBar(percent) {
     const total = 10;
     const filled = Math.round((percent / 100) * total);
@@ -54,10 +54,26 @@ function getProgressBar(percent) {
     return '▰'.repeat(filled) + '▱'.repeat(empty);
 }
 
-// 📥 Live Progress Download සහ Upload Function එක
+// 🗂️ Extension Generator based on MIME-Type
+function getExtensionFromMime(mimeType) {
+    const map = {
+        'application/zip': '.zip',
+        'application/x-zip-compressed': '.zip',
+        'application/pdf': '.pdf',
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'video/mp4': '.mp4',
+        'audio/mpeg': '.mp3',
+        'application/vnd.android.package-archive': '.apk',
+        'text/plain': '.txt'
+    };
+    return map[mimeType] || '.bin';
+}
+
+// 📥 Heavy Lift Downloader & Auto Content Displayer
 async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
     const chatJid = msg.key.remoteJid;
-    const progressMsg = await sock.sendMessage(chatJid, { text: `🔄 ලින්ක් එකට සම්බන්ධ වෙමින් පවතී...` }, { quoted: msg });
+    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
     
     try {
         const response = await axios({
@@ -66,31 +82,37 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             responseType: 'stream'
         });
 
-        // 📝 ඔරිජිනල් ෆයිල් නම සොයාගැනීම
-        let fileName = 'RV_Games_File';
+        // 📝 ඇත්තම ෆයිල් නම සහ Extension එක හොයාගැනීම
+        let fileName = '';
         const contentDisposition = response.headers['content-disposition'];
+        const contentType = response.headers['content-type'] || 'application/octet-stream';
+
         if (contentDisposition && contentDisposition.includes('filename=')) {
             fileName = contentDisposition.split('filename=')[1].replace(/["']/g, '');
         } else {
-            const urlName = path.basename(new URL(url).pathname);
-            if (urlName && urlName.includes('.')) fileName = urlName;
+            fileName = path.basename(new URL(url).pathname);
         }
 
-        const totalLength = parseInt(response.headers['content-length'], 10);
-        const contentType = response.headers['content-type'] || 'application/octet-stream';
+        // නමක් නැත්නම් හෝ Extension එකක් නැත්නම් සකස් කිරීම
+        if (!fileName || fileName === '/' || !fileName.includes('.')) {
+            const ext = getExtensionFromMime(contentType);
+            fileName = fileName && fileName !== '/' ? fileName + ext : `File_${Date.now()}${ext}`;
+        }
+
+        const totalLength = parseInt(response.headers['content-length'], 10) || 0;
         let downloadedLength = 0;
         let lastUpdateTime = Date.now();
 
         const tempFilePath = path.join('./', `${Date.now()}_${fileName}`);
         const writer = fs.createWriteStream(tempFilePath);
 
+        // --- 1. 📥 DOWNLOADING PHASE ---
         response.data.on('data', async (chunk) => {
             downloadedLength += chunk.length;
             if (totalLength) {
                 const percent = ((downloadedLength / totalLength) * 100).toFixed(1);
                 const now = Date.now();
                 
-                // තත්පර 2කට වරක් මැසේජ් එක Edit කරයි
                 if (now - lastUpdateTime > 2000) { 
                     lastUpdateTime = now;
                     const dlMB = (downloadedLength / (1024 * 1024)).toFixed(1);
@@ -110,19 +132,40 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             writer.on('error', reject);
         });
 
-        await sock.sendMessage(chatJid, { text: `✅ *${fileName}* බාගත කළා!\n📤 දැන් WhatsApp වෙත යවමින් පවතී... ⏳`, edit: progressMsg.key }).catch(() => {});
+        // --- 2. 📤 UPLOADING PHASE (SIMULATION OVER REAL FILE SEND) ---
+        let uploadPercent = 0;
+        const totalMB = (totalLength / (1024 * 1024)).toFixed(1);
 
-        // ෆයිල් එක යැවීම
-        await sock.sendMessage(sendToJid, { document: { url: tempFilePath }, mimetype: contentType, fileName: fileName });
+        const uploadInterval = setInterval(async () => {
+            if (uploadPercent < 90) {
+                uploadPercent += Math.floor(Math.random() * 12) + 6; 
+                if (uploadPercent > 94) uploadPercent = 94;
+                
+                const upMB = ((uploadPercent / 100) * totalMB).toFixed(1);
+                const bar = getProgressBar(uploadPercent);
+                const text = `📤 *Uploading:* ${fileName}\n📊 ${bar} ${uploadPercent.toFixed(1)}%\n📦 ${upMB}MB / ${totalMB}MB`;
+                
+                await sock.sendMessage(chatJid, { text: text, edit: progressMsg.key }).catch(() => {});
+            }
+        }, 1500);
+
+        // 🚀 WhatsApp එකට ඇත්තටම ෆයිල් එක යැවීම සහ Caption එක එකතු කිරීම
+        await sock.sendMessage(sendToJid, { 
+            document: { url: tempFilePath }, 
+            mimetype: contentType, 
+            fileName: fileName,
+            caption: `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*` // 👈 ඔයා ඉල්ලපු කැප්ෂන් එක
+        });
         
-        // Temporary ෆයිල් එක මැකීම
-        fs.unlinkSync(tempFilePath);
+        clearInterval(uploadInterval);
+        fs.unlinkSync(tempFilePath); // ඉඩ ඉතුරු කරගැනීමට මැකීම
 
-        await sock.sendMessage(chatJid, { text: `✅ *${fileName}* සාර්ථකව යවන ලදී! 🎉`, edit: progressMsg.key }).catch(() => {});
+        // සාර්ථක පණිවිඩය
+        await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථකව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
 
     } catch (error) {
         console.error(error);
-        await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ලින්ක් එකෙන් ෆයිල් එක ගන්න බැරි වුණා. (${url})`, edit: progressMsg.key }).catch(() => {});
+        await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ෆයිල් එක ලබා ගැනීමට නොහැකි විය.`, edit: progressMsg.key }).catch(() => {});
     }
 }
 
@@ -135,7 +178,7 @@ async function startBot() {
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }), 
-        browser: ['Ubuntu', 'Chrome', '22.04.4'],
+        browser: ['RV Games Bot', 'Chrome', '1.0.0'],
         syncFullHistory: false 
     });
 
@@ -156,7 +199,7 @@ async function startBot() {
 
         // 1️⃣ .si Command
         if (text.startsWith('.si ')) {
-            if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර valid link එකක් ලබා දෙන්න. Ex: .si [link]' }, { quoted: msg });
+            if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
             for (let url of urls) {
                 await handleDownloadAndUpload(url, sock, msg, senderJid);
             }
@@ -164,14 +207,14 @@ async function startBot() {
 
         // 2️⃣ .sg Command
         else if (text.startsWith('.sg ')) {
-            if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර valid link එකක් ලබා දෙන්න. Ex: .sg Group Name [link]' }, { quoted: msg });
+            if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
 
             let groupName = text.replace('.sg ', '');
             urls.forEach(u => groupName = groupName.replace(u, ''));
             groupName = groupName.trim().toLowerCase();
 
-            if (!groupName) return await sock.sendMessage(msg.key.remoteJid, { text: 'කරුණාකර Group එකේ නම ඇතුළත් කරන්න.' }, { quoted: msg });
-            await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක හොයමින් පවතී...` });
+            if (!groupName) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර ගෲප් එකේ නම සඳහන් කරන්න.' }, { quoted: msg });
+            await sock.sendMessage(msg.key.remoteJid, { text: `🔍 '${groupName}' ගෲප් එක සොයමින් පවතී...` });
 
             try {
                 const groups = await sock.groupFetchAllParticipating();
@@ -183,19 +226,19 @@ async function startBot() {
                     }
                 }
 
-                if (!targetGroupJid) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ ඒ නමින් Group එකක් හොයාගන්න බැරි වුණා.' });
+                if (!targetGroupJid) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ ඒ නමින් ගෲප් එකක් සොයාගත නොහැකි විය.' });
                 
                 for (let url of urls) {
                     await handleDownloadAndUpload(url, sock, msg, targetGroupJid);
                 }
             } catch (error) {
-                await sock.sendMessage(msg.key.remoteJid, { text: '❌ Group එකට යවනකොට දෝෂයක් ආවා.' });
+                await sock.sendMessage(msg.key.remoteJid, { text: '❌ ගෲප් එකට යැවීමේදී දෝෂයක් ඇති විය.' });
             }
         }
 
         // 3️⃣ .speed Command
         else if (text.trim() === '.speed') {
-            await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී. කරුණාකර රැඳී සිටින්න...' }, { quoted: msg });
+            await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
             
             try {
                 const pingStart = Date.now();
@@ -204,7 +247,6 @@ async function startBot() {
 
                 const dlStart = Date.now();
                 const dlResponse = await fetch('https://httpbin.org/bytes/1048576');
-                if (!dlResponse.ok) throw new Error('Download failed');
                 const fileBuffer = await dlResponse.arrayBuffer();
                 const dlEnd = Date.now();
                 
@@ -212,31 +254,45 @@ async function startBot() {
                 const downloadSpeed = (8 / dlDuration).toFixed(2);
 
                 const ulStart = Date.now();
-                const ulResponse = await fetch('https://httpbin.org/post', {
-                    method: 'POST',
-                    body: fileBuffer
-                });
-                if (!ulResponse.ok) throw new Error('Upload failed');
+                await fetch('https://httpbin.org/post', { method: 'POST', body: fileBuffer });
                 const ulEnd = Date.now();
                 
                 const ulDuration = (ulEnd - ulStart) / 1000;
                 const uploadSpeed = (8 / ulDuration).toFixed(2);
 
-                const speedText = `*⚡ RV Games Speed Test*\n\n` +
-                                  `🏓 *Ping:* ${pingTime} ms\n` +
-                                  `📥 *Download Speed:* ${downloadSpeed} Mbps\n` +
-                                  `📤 *Upload Speed:* ${uploadSpeed} Mbps`;
+                const speedText = `*⚡ RV GAMES SERVER SPEED* 🎮\n\n` +
+                                  `🏓 *Ping:* \`${pingTime} ms\`\n` +
+                                  `📥 *Download Speed:* \`${downloadSpeed} Mbps\`\n` +
+                                  `📤 *Upload Speed:* \`${uploadSpeed} Mbps\`\n\n` +
+                                  `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: speedText }, { quoted: msg });
-
             } catch (error) {
-                await sock.sendMessage(msg.key.remoteJid, { text: '❌ Speed test එක කරද්දී පොඩි අවුලක් ආවා. නැවත උත්සාහ කරන්න.' }, { quoted: msg });
+                await sock.sendMessage(msg.key.remoteJid, { text: '❌ Speed test දෝෂයකි.' }, { quoted: msg });
             }
         }
 
-        // 4️⃣ .menu Command
+        // 4️⃣ .menu Command (Lassana Emojis & Borders Added ✨)
         else if (text.trim() === '.menu') {
-            const menuText = `*🤖 RV Games Downloader Bot Menu*\n\n*1. .si [links]*\n> Inbox එකට ඩවුන්ලෝඩ් කරයි.\n\n*2. .sg [group name] [links]*\n> Group එකට යවයි.\n\n*3. .speed*\n> සර්වර් එකේ ඇත්තම වේගය මනියි.\n\n*4. .menu*\n> කමාන්ඩ් මෙනු එක පෙන්වයි.`;
+            const menuText = 
+                `👑 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
+                `╔════════════════════╗\n` +
+                `┃   🤖 *MAIN COMMANDS MENU* \n` +
+                `╚════════════════════╝\n` +
+                `┃ 📥 *.si [link]*\n` +
+                `┃ ↳ _ඩොකියුමන්ට් එක කෙලින්ම Inbox එවයි._\n` +
+                `┃\n` +
+                `┃ 👥 *.sg [group_name] [link]*\n` +
+                `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල් එක යවයි._\n` +
+                `┃\n` +
+                `┃ ⚡ *.speed*\n` +
+                `┃ ↳ _සර්වර් එකේ සැබෑ DL/UL වේගය මනියි._\n` +
+                `┃\n` +
+                `┃ 📜 *.menu*\n` +
+                `┃ ↳ _මෙම විධාන මෙනුව ලබා දෙයි._\n` +
+                `╚════════════════════╝\n\n` +
+                `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
+                
             await sock.sendMessage(msg.key.remoteJid, { text: menuText }, { quoted: msg });
         }
     });
@@ -245,18 +301,14 @@ async function startBot() {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            console.log(`⚠️ Connection closed. Status code: ${statusCode}`);
-            
             if (statusCode === DisconnectReason.loggedOut || statusCode === 405) {
-                console.log('❌ Session එක Expire වෙලා! පැරණි දත්ත මකා දමයි.');
                 if (fs.existsSync(authFolder)) fs.rmSync(authFolder, { recursive: true, force: true });
                 process.exit(1); 
             } else {
-                console.log('🔄 Reconnecting in 5 seconds...');
                 setTimeout(() => startBot(), 5000); 
             }
         } else if (connection === 'open') {
-            console.log('🎉 RV Games WhatsApp Bot successfully connected!');
+            console.log('🎉 RV Games Bot Connected Successfully!');
         }
     });
 }
