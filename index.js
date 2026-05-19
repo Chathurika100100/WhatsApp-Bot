@@ -92,6 +92,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         const contentDisposition = response.headers['content-disposition'];
         const contentType = response.headers['content-type'] || 'application/octet-stream';
 
+        // 1. Header එකෙන් නම සෙවීම
         if (contentDisposition) {
             const utf8Match = contentDisposition.match(/filename\*=\s*UTF-8''([^;\r\n]*)/i);
             if (utf8Match && utf8Match[1]) {
@@ -104,14 +105,18 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             }
         }
 
+        // 2. Header එකේ නැත්නම් URL එකෙන් නම සෙවීම (නව එකතු කිරීම)
         if (!fileName) {
             try {
-                const cleanUrl = url.split('?')[0].split('#')[0];
-                let pathName = path.basename(cleanUrl);
-                if (pathName && pathName !== '/' && !pathName.includes('%')) {
-                    fileName = decodeURIComponent(pathName);
+                const urlParts = url.split('/');
+                const lastPart = urlParts[urlParts.length - 1];
+                const cleanName = lastPart.split('?')[0].split('#')[0];
+                if (cleanName && cleanName.includes('.')) {
+                    fileName = decodeURIComponent(cleanName);
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.log("URL එකෙන් නම ගන්න බැරි වුණා.");
+            }
         }
 
         if (fileName) {
@@ -134,20 +139,17 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         const tempFilePath = path.join('./', `${Date.now()}_${fileName}`);
         const writer = fs.createWriteStream(tempFilePath);
 
-        // --- 1. 📥 DOWNLOADING PHASE ---
         response.data.on('data', async (chunk) => {
             downloadedLength += chunk.length;
             if (totalLength) {
                 const percent = ((downloadedLength / totalLength) * 100).toFixed(1);
                 const now = Date.now();
-                
                 if (now - lastUpdateTime > 2000) { 
                     lastUpdateTime = now;
                     const dlMB = (downloadedLength / (1024 * 1024)).toFixed(1);
                     const totMB = (totalLength / (1024 * 1024)).toFixed(1);
                     const bar = getProgressBar(percent);
                     const text = `📥 *Downloading:* ${fileName}\n📊 ${bar} ${percent}%\n📦 ${dlMB}MB / ${totMB}MB`;
-                    
                     await sock.sendMessage(chatJid, { text: text, edit: progressMsg.key }).catch(() => {});
                 }
             }
@@ -160,7 +162,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             writer.on('error', reject);
         });
 
-        // --- 2. 📤 UPLOADING PHASE ---
         let uploadPercent = 0;
         const totalMB = (totalLength / (1024 * 1024)).toFixed(1);
 
@@ -168,16 +169,13 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             if (uploadPercent < 90) {
                 uploadPercent += Math.floor(Math.random() * 12) + 6; 
                 if (uploadPercent > 94) uploadPercent = 94;
-                
                 const upMB = ((uploadPercent / 100) * totalMB).toFixed(1);
                 const bar = getProgressBar(uploadPercent);
                 const text = `📤 *Uploading:* ${fileName}\n📊 ${bar} ${uploadPercent.toFixed(1)}%\n📦 ${upMB}MB / ${totalMB}MB`;
-                
                 await sock.sendMessage(chatJid, { text: text, edit: progressMsg.key }).catch(() => {});
             }
         }, 1500);
 
-        // 🚀 WhatsApp එකට යැවීම
         await sock.sendMessage(sendToJid, { 
             document: { url: tempFilePath }, 
             mimetype: contentType, 
@@ -189,7 +187,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); 
 
         await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථකව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
-        return true; // සාර්ථකයි නම් true රිටන් කරයි
+        return true; 
 
     } catch (error) {
         console.error(error);
@@ -225,7 +223,6 @@ async function startBot() {
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
 
-        // 1️⃣ .si Command 
         if (text.startsWith('.si ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
             for (let url of urls) {
@@ -233,7 +230,6 @@ async function startBot() {
             }
         }
 
-        // 2️⃣ .sg Command (Group Upload + Auto End Summary Report)
         else if (text.startsWith('.sg ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
 
@@ -256,7 +252,6 @@ async function startBot() {
 
                 if (!targetGroupJid) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ ඒ නමින් ගෲප් එකක් සොයාගත නොහැකි විය.' });
                 
-                // ⏱️ මුළු ක්‍රියාවලියටම යන වෙලාව මැනීම ආරම්භය
                 const startTime = Date.now();
                 let uploadedCount = 0;
 
@@ -268,7 +263,6 @@ async function startBot() {
                 const endTime = Date.now();
                 const totalTimeSeconds = ((endTime - startTime) / 1000).toFixed(1);
 
-                // 📊 ඔයා ඉල්ලපු ලස්සන Done Summary Message එක ගෲප් එකටම යැවීම 
                 if (uploadedCount > 0) {
                     const summaryText = 
                         `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
@@ -290,27 +284,21 @@ async function startBot() {
             }
         }
 
-        // 3️⃣ .speed Command
         else if (text.trim() === '.speed') {
             await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
-            
             try {
                 const pingStart = Date.now();
                 await fetch('https://httpbin.org/ping');
                 const pingTime = Date.now() - pingStart;
-
                 const dlStart = Date.now();
                 const dlResponse = await fetch('https://httpbin.org/bytes/1048576'); 
                 const fileBuffer = await dlResponse.arrayBuffer();
                 const dlEnd = Date.now();
-                
                 const dlDuration = (dlEnd - dlStart) / 1000;
                 const downloadSpeed = (8 / dlDuration).toFixed(2);
-
                 const ulStart = Date.now();
                 await fetch('https://httpbin.org/post', { method: 'POST', body: fileBuffer });
                 const ulEnd = Date.now();
-                
                 const ulDuration = (ulEnd - ulStart) / 1000;
                 const uploadSpeed = (8 / ulDuration).toFixed(2);
 
@@ -326,7 +314,6 @@ async function startBot() {
             }
         }
 
-        // 4️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
                 `👑 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
