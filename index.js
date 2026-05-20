@@ -16,6 +16,7 @@ server.listen(PORT, () => {
 });
 
 const authFolder = './bot_session';
+const activeTasks = new Map(); // 🛑 සක්‍රීය ඩවුන්ලෝඩ්/අප්ලෝඩ් ට්‍රැක් කිරීමට
 
 // 📂 Session ID Setup
 function setupSession() {
@@ -78,11 +79,24 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
     const chatJid = msg.key.remoteJid;
     const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
     
+    // නව AbortController එකක් සෑදීම (.stop විධානය සඳහා)
+    const controller = new AbortController();
+    activeTasks.set(chatJid, {
+        controller,
+        progressMsgKey: progressMsg.key,
+        uploadInterval: null,
+        tempFilePath: null,
+        writer: null
+    });
+
+    let tempFilePath = '';
+
     try {
         const response = await axios({
             url,
             method: 'GET',
             responseType: 'stream',
+            signal: controller.signal, // Abort සංඥාව ඇතුළත් කිරීම
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
@@ -92,7 +106,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         const contentDisposition = response.headers['content-disposition'];
         const contentType = response.headers['content-type'] || 'application/octet-stream';
 
-        // 1. Header එකෙන් නම සෙවීම
         if (contentDisposition) {
             const utf8Match = contentDisposition.match(/filename\*=\s*UTF-8''([^;\r\n]*)/i);
             if (utf8Match && utf8Match[1]) {
@@ -105,7 +118,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             }
         }
 
-        // 2. Header එකේ නැත්නම් URL එකෙන් නම සෙවීම (නව එකතු කිරීම)
         if (!fileName) {
             try {
                 const urlParts = url.split('/');
@@ -136,8 +148,15 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         let downloadedLength = 0;
         let lastUpdateTime = Date.now();
 
-        const tempFilePath = path.join('./', `${Date.now()}_${fileName}`);
+        tempFilePath = path.join('./', `${Date.now()}_${fileName}`);
         const writer = fs.createWriteStream(tempFilePath);
+
+        // Active task එකට ෆයිල් විස්තර එකතු කිරීම
+        if (activeTasks.has(chatJid)) {
+            const task = activeTasks.get(chatJid);
+            task.tempFilePath = tempFilePath;
+            task.writer = writer;
+        }
 
         response.data.on('data', async (chunk) => {
             downloadedLength += chunk.length;
@@ -160,6 +179,10 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         await new Promise((resolve, reject) => {
             writer.on('finish', resolve);
             writer.on('error', reject);
+            controller.signal.addEventListener('abort', () => {
+                writer.destroy();
+                reject(new Error('STOPPED'));
+            });
         });
 
         let uploadPercent = 0;
@@ -176,6 +199,10 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             }
         }, 1500);
 
+        if (activeTasks.has(chatJid)) {
+            activeTasks.get(chatJid).uploadInterval = uploadInterval;
+        }
+
         await sock.sendMessage(sendToJid, { 
             document: { url: tempFilePath }, 
             mimetype: contentType, 
@@ -185,12 +212,29 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         
         clearInterval(uploadInterval);
         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); 
+        activeTasks.delete(chatJid);
 
-        await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථකව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
+        await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
         return true; 
 
     } catch (error) {
+        // Stop කලාම සිදුවන දත්ත පිරිසිදු කිරීම්
+        const task = activeTasks.get(chatJid);
+        if (task) {
+            if (task.uploadInterval) clearInterval(task.uploadInterval);
+            if (task.writer) task.writer.destroy();
+        }
+        if (tempFilePath && fs.existsSync(tempFilePath)) {
+            try { fs.unlinkSync(tempFilePath); } catch (e) {}
+        }
+
+        if (axios.isCancel(error) || error.message === 'STOPPED' || controller.signal.aborted) {
+            activeTasks.delete(chatJid);
+            return 'STOPPED'; // ලූපය නැවැත්වීමට සංඥාවක් යැවීම
+        }
+
         console.error(error);
+        activeTasks.delete(chatJid);
         await sock.sendMessage(chatJid, { text: `❌ දෝෂයක්: ෆයිල් එක ලබා ගැනීමට නොහැකි විය.`, edit: progressMsg.key }).catch(() => {});
         return false;
     }
@@ -219,17 +263,21 @@ async function startBot() {
         if (!text.startsWith('.')) return; 
 
         const senderJid = msg.key.participant || msg.key.remoteJid; 
+        const chatJid = msg.key.remoteJid;
         
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
 
+        // 1️⃣ .si Command 
         if (text.startsWith('.si ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
             for (let url of urls) {
-                await handleDownloadAndUpload(url, sock, msg, senderJid);
+                const res = await handleDownloadAndUpload(url, sock, msg, senderJid);
+                if (res === 'STOPPED') break; // ස්ටොප් කරා නම් ඉතිරි ලින්ක් නවත්වන්න
             }
         }
 
+        // 2️⃣ .sg Command
         else if (text.startsWith('.sg ')) {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
 
@@ -254,16 +302,21 @@ async function startBot() {
                 
                 const startTime = Date.now();
                 let uploadedCount = 0;
+                let wasStopped = false;
 
                 for (let url of urls) {
                     const success = await handleDownloadAndUpload(url, sock, msg, targetGroupJid);
+                    if (success === 'STOPPED') {
+                        wasStopped = true;
+                        break;
+                    }
                     if (success) uploadedCount++;
                 }
 
                 const endTime = Date.now();
                 const totalTimeSeconds = ((endTime - startTime) / 1000).toFixed(1);
 
-                if (uploadedCount > 0) {
+                if (uploadedCount > 0 && !wasStopped) {
                     const summaryText = 
                         `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
                         `      ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
@@ -277,6 +330,8 @@ async function startBot() {
 
                     await sock.sendMessage(targetGroupJid, { text: summaryText });
                     await sock.sendMessage(msg.key.remoteJid, { text: `✅ සියලුම Parts (${uploadedCount}) ගෲප් එකට සාර්ථකව යවා Summary වාර්තාවද ලබා දෙන ලදී!`, edit: initialNotify.key });
+                } else if (wasStopped) {
+                    await sock.sendMessage(msg.key.remoteJid, { text: `🛑 ක්‍රියාවලිය නවත්වන ලද නිසා ගෲප් වාර්තා යැවීම අවලංගු කරන ලදී.`, edit: initialNotify.key });
                 }
 
             } catch (error) {
@@ -284,6 +339,42 @@ async function startBot() {
             }
         }
 
+        // 3️⃣ NEW: .stop Command
+        else if (text.trim() === '.stop') {
+            if (activeTasks.has(chatJid)) {
+                const task = activeTasks.get(chatJid);
+                
+                // 1. Abort Request & Clear Interval
+                task.controller.abort();
+                if (task.uploadInterval) clearInterval(task.uploadInterval);
+                if (task.writer) task.writer.destroy();
+
+                // 2. Edit Progress Msg to "Stopped"
+                if (task.progressMsgKey) {
+                    const stoppedText = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
+                                        `      ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                                        `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
+                                        `🛑 *Status: Process Stopped!*\n` +
+                                        `⚠️ _දත්ත බාගත කිරීම හෝ යැවීම පරිශීලකයා විසින් නවතා දමා ඇත._\n\n` +
+                                        `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
+                    await sock.sendMessage(chatJid, { text: stoppedText, edit: task.progressMsgKey }).catch(() => {});
+                }
+
+                // 3. Clean Files
+                setTimeout(() => {
+                    if (task.tempFilePath && fs.existsSync(task.tempFilePath)) {
+                        try { fs.unlinkSync(task.tempFilePath); } catch (e) {}
+                    }
+                }, 1000);
+
+                activeTasks.delete(chatJid);
+                await sock.sendMessage(chatJid, { text: '✅ සියලුම සක්‍රීය ඩවුන්ලෝඩ්/අප්ලෝඩ් ක්‍රියාවලීන් නතර කර දත්ත ඉවත් කරන ලදී!' }, { quoted: msg });
+            } else {
+                await sock.sendMessage(chatJid, { text: '❌ මේ මොහොතේ කිසිදු ෆයිල් එකක් බාගත වෙමින් පවතින්නේ නැත.' }, { quoted: msg });
+            }
+        }
+
+        // 4️⃣ .speed Command
         else if (text.trim() === '.speed') {
             await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
             try {
@@ -314,6 +405,7 @@ async function startBot() {
             }
         }
 
+        // 5️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
                 `👑 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
@@ -325,6 +417,9 @@ async function startBot() {
                 `┃\n` +
                 `┃ 👥 *.sg [group name] [link 1] [link 2]*\n` +
                 `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල්ස් සහ Summary වාර්තාව යවයි._\n` +
+                `┃\n` +
+                `┃ 🛑 *.stop*\n` +
+                `┃ ↳ _සිදු වෙමින් පවතින ඕනෑම ක්‍රියාවලියක් නතර කරයි._\n` +
                 `┃\n` +
                 `┃ ⚡ *.speed*\n` +
                 `┃ ↳ _සර්වර් එකේ සැබෑ DL/UL වේගය මනියි._\n` +
