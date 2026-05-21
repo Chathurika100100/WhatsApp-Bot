@@ -279,7 +279,9 @@ async function startBot() {
         
         // 🔒 PRIVATE BOT SECURITY CHECK (අවසර ලත් අංක පරීක්ෂාව)
         const allowedNumbers = ['94701030330', '94740375946'];
-        const senderNumber = senderJid.split('@')[0]; // JID එකෙන් පිරිසිදු ෆෝන් නම්බර් එක වෙන් කර ගැනීම
+        
+        // JID එකෙන් පිරිසිදු ෆෝන් නම්බර් එක වෙන් කර ගැනීම (Device ID එක අයින් කිරීම)
+        const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
         if (!allowedNumbers.includes(senderNumber)) {
             const privateMessage = 
