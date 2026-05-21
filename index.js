@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import http from 'http'; 
 import axios from 'axios'; 
+import NodeCache from 'node-cache'; // අලුතින් එකතු කරන ලදී
 
 // 🌐 Web Server for Railway
 const server = http.createServer((req, res) => {
@@ -16,7 +17,8 @@ server.listen(PORT, () => {
 });
 
 const authFolder = './bot_session';
-const activeTasks = new Map(); // 🛑 සක්‍රීය ඩවුන්ලෝඩ්/අප්ලෝඩ් ට්‍රැක් කිරීමට
+const activeTasks = new Map(); 
+const msgRetryCounterCache = new NodeCache(); // මැසේජ් Decrypt වීමේ ගැටලු මඟහරවා ගැනීමට
 
 // 📂 Session ID Setup
 function setupSession() {
@@ -77,7 +79,7 @@ function getExtensionFromMime(mimeType) {
 // 📥 Heavy Lift Downloader & Auto Content Displayer
 async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
     const chatJid = msg.key.remoteJid;
-    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾ஸ Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
+    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
     
     const controller = new AbortController();
     activeTasks.set(chatJid, {
@@ -226,7 +228,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); 
         activeTasks.delete(chatJid);
 
-        await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
+        await sock.sendMessage(chatJid, { text: `🎉 *${fileName}* සාර්ථකව යවන ලදී!\n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`, edit: progressMsg.key }).catch(() => {});
         return true; 
 
     } catch (error) {
@@ -262,7 +264,8 @@ async function startBot() {
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }), 
         browser: ['RV Games Bot', 'Chrome', '1.0.0'],
-        syncFullHistory: false 
+        syncFullHistory: false,
+        msgRetryCounterCache // Decrypt දෝෂ මඟහැරීමට එකතු කළ කොටස
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -277,10 +280,10 @@ async function startBot() {
         const senderJid = msg.key.participant || msg.key.remoteJid; 
         const chatJid = msg.key.remoteJid;
         
-        // 🔒 PRIVATE BOT SECURITY CHECK (අවසර ලත් අංක පරීක්ෂාව)
-        const allowedNumbers = ['94701030330', '94740375946'];
+        // 🔒 PRIVATE BOT SECURITY CHECK
+        // මෙතනට ඔයා භාවිතා කරන නම්බර් එක අනිවාර්යයෙන් ඇතුළත් කරන්න.
+        const allowedNumbers = ['94701030330', '94740375946', '947XXXXXXXX']; 
         
-        // JID එකෙන් පිරිසිදු ෆෝන් නම්බර් එක වෙන් කර ගැනීම (Device ID එක අයින් කිරීම)
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
         if (!allowedNumbers.includes(senderNumber)) {
@@ -360,7 +363,7 @@ async function startBot() {
                     await sock.sendMessage(targetGroupJid, { text: summaryText });
                     await sock.sendMessage(msg.key.remoteJid, { text: `✅ සියලුම Parts (${uploadedCount}) ගෲප් එකට සාර්ථකව යවා Summary වාර්තාවද ලබා දෙන ලදී!`, edit: initialNotify.key });
                 } else if (wasStopped) {
-                    await sock.sendMessage(msg.key.remoteJid, { text: `🛑 **ක්‍රියාවලිය නවත්වන ලද නිසා ගෲප් වාර්තා යැවීම අවලංගු කරන ලදී.**`, edit: initialNotify.key });
+                    await sock.sendMessage(msg.key.remoteJid, { text: `🛑 *ක්‍රියාවලිය නවත්වන ලද නිසා ගෲප් වාර්තා යැවීම අවලංගු කරන ලදී.*`, edit: initialNotify.key });
                 }
 
             } catch (error) {
@@ -368,7 +371,7 @@ async function startBot() {
             }
         }
 
-        // 3️⃣ NEW: .stop Command
+        // 3️⃣ .stop Command
         else if (text.trim().startsWith('.stop')) { 
             if (activeTasks.has(chatJid)) {
                 const task = activeTasks.get(chatJid);
