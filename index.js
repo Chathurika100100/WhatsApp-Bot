@@ -77,16 +77,16 @@ function getExtensionFromMime(mimeType) {
 // 📥 Heavy Lift Downloader & Auto Content Displayer
 async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
     const chatJid = msg.key.remoteJid;
-    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾𝗌 Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
+    const progressMsg = await sock.sendMessage(chatJid, { text: `🔍 𝖱𝖵 𝖦𝖺𝗆𝖾ஸ Bot ලින්ක් එක පරීක්ෂා කරමින් පවතී...` }, { quoted: msg });
     
-    // නව AbortController එකක් සෑදීම (.stop විධානය සඳහා)
     const controller = new AbortController();
     activeTasks.set(chatJid, {
         controller,
         progressMsgKey: progressMsg.key,
         uploadInterval: null,
         tempFilePath: null,
-        writer: null
+        writer: null,
+        stream: null // 👈 Stream එක track කිරීමට අලුතෙන් එකතු කළා
     });
 
     let tempFilePath = '';
@@ -96,11 +96,16 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             url,
             method: 'GET',
             responseType: 'stream',
-            signal: controller.signal, // Abort සංඥාව ඇතුළත් කිරීම
+            signal: controller.signal, 
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
         });
+
+        // සක්‍රීය Task එකට response stream එක එකතු කිරීම
+        if (activeTasks.has(chatJid)) {
+            activeTasks.get(chatJid).stream = response.data;
+        }
 
         let fileName = '';
         const contentDisposition = response.headers['content-disposition'];
@@ -151,7 +156,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         tempFilePath = path.join('./', `${Date.now()}_${fileName}`);
         const writer = fs.createWriteStream(tempFilePath);
 
-        // Active task එකට ෆයිල් විස්තර එකතු කිරීම
         if (activeTasks.has(chatJid)) {
             const task = activeTasks.get(chatJid);
             task.tempFilePath = tempFilePath;
@@ -159,12 +163,18 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         }
 
         response.data.on('data', async (chunk) => {
+            // 👈 සලකා බැලිය යුතුම කොටස: Stop කර ඇත්නම් මැසේජ් යැවීම වහාම නතර කරයි
+            if (controller.signal.aborted) return;
+
             downloadedLength += chunk.length;
             if (totalLength) {
                 const percent = ((downloadedLength / totalLength) * 100).toFixed(1);
                 const now = Date.now();
                 if (now - lastUpdateTime > 2000) { 
                     lastUpdateTime = now;
+                    
+                    if (controller.signal.aborted) return; // මැසේජ් එක යවන්න කලින් නැවත පරික්ෂා කිරීම
+                    
                     const dlMB = (downloadedLength / (1024 * 1024)).toFixed(1);
                     const totMB = (totalLength / (1024 * 1024)).toFixed(1);
                     const bar = getProgressBar(percent);
@@ -189,6 +199,10 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         const totalMB = (totalLength / (1024 * 1024)).toFixed(1);
 
         const uploadInterval = setInterval(async () => {
+            if (controller.signal.aborted) {
+                clearInterval(uploadInterval);
+                return;
+            }
             if (uploadPercent < 90) {
                 uploadPercent += Math.floor(Math.random() * 12) + 6; 
                 if (uploadPercent > 94) uploadPercent = 94;
@@ -218,11 +232,11 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         return true; 
 
     } catch (error) {
-        // Stop කලාම සිදුවන දත්ත පිරිසිදු කිරීම්
         const task = activeTasks.get(chatJid);
         if (task) {
             if (task.uploadInterval) clearInterval(task.uploadInterval);
-            if (task.writer) task.writer.destroy();
+            if (task.writer) { try { task.writer.destroy(); } catch(e){} }
+            if (task.stream) { try { task.stream.destroy(); } catch(e){} }
         }
         if (tempFilePath && fs.existsSync(tempFilePath)) {
             try { fs.unlinkSync(tempFilePath); } catch (e) {}
@@ -230,7 +244,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
 
         if (axios.isCancel(error) || error.message === 'STOPPED' || controller.signal.aborted) {
             activeTasks.delete(chatJid);
-            return 'STOPPED'; // ලූපය නැවැත්වීමට සංඥාවක් යැවීම
+            return 'STOPPED'; 
         }
 
         console.error(error);
@@ -257,7 +271,7 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
-        if (!msg.message) return;
+        if (!msg.message || msg.key.fromMe) return; // 👈 Bot ගේම මැසේජ් වලට Bot ප්‍රතිචාර දැක්වීම වැළැක්වීමට
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         if (!text.startsWith('.')) return; 
@@ -273,7 +287,7 @@ async function startBot() {
             if (urls.length === 0) return await sock.sendMessage(msg.key.remoteJid, { text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.' }, { quoted: msg });
             for (let url of urls) {
                 const res = await handleDownloadAndUpload(url, sock, msg, senderJid);
-                if (res === 'STOPPED') break; // ස්ටොප් කරා නම් ඉතිරි ලින්ක් නවත්වන්න
+                if (res === 'STOPPED') break; 
             }
         }
 
@@ -319,7 +333,7 @@ async function startBot() {
                 if (uploadedCount > 0 && !wasStopped) {
                     const summaryText = 
                         `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                        `      ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                        `       ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                         `┌────────────────────────\n` +
                         `│ ✅ Status: Done\n` +
@@ -340,19 +354,20 @@ async function startBot() {
         }
 
         // 3️⃣ NEW: .stop Command
-        else if (text.trim() === '.stop') {
+        else if (text.trim().startsWith('.stop')) { // 👈 වඩාත් නිවැරදිව හඳුනාගැනීමට .startsWith එකතු කළා
             if (activeTasks.has(chatJid)) {
                 const task = activeTasks.get(chatJid);
                 
-                // 1. Abort Request & Clear Interval
+                // 1. Abort Request, Stream & Clear Interval
                 task.controller.abort();
                 if (task.uploadInterval) clearInterval(task.uploadInterval);
-                if (task.writer) task.writer.destroy();
+                if (task.stream) { try { task.stream.destroy(); } catch(e){} } // 👈 Stream එක බලහත්කාරයෙන් නවත්වයි
+                if (task.writer) { try { task.writer.destroy(); } catch(e){} }
 
                 // 2. Edit Progress Msg to "Stopped"
                 if (task.progressMsgKey) {
                     const stoppedText = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                                        `      ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                                        `       ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                                         `🛑 *Status: Process Stopped!*\n` +
                                         `⚠️ _දත්ත බාගත කිරීම හෝ යැවීම පරිශීලකයා විසින් නවතා දමා ඇත._\n\n` +
@@ -388,7 +403,6 @@ async function startBot() {
                 const dlDuration = (dlEnd - dlStart) / 1000;
                 const downloadSpeed = (8 / dlDuration).toFixed(2);
                 const ulStart = Date.now();
-                await fetch('https://httpbin.org/post', { method: 'POST', body: fileBuffer });
                 const ulEnd = Date.now();
                 const ulDuration = (ulEnd - ulStart) / 1000;
                 const uploadSpeed = (8 / ulDuration).toFixed(2);
@@ -408,9 +422,9 @@ async function startBot() {
         // 5️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
-                `👑 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
+                `👑 *👑 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
                 `╔════════════════════╗\n` +
-                `┃   🤖 *MAIN COMMANDS MENU* \n` +
+                `┃    🤖 *MAIN COMMANDS MENU* \n` +
                 `╚════════════════════╝\n` +
                 `┃ 📥 *.si [link 1] [link 2]*\n` +
                 `┃ ↳ _ලින්ක් කීපයක් වුවද එකවර Inbox එවයි._\n` +
