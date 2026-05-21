@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import http from 'http'; 
 import axios from 'axios'; 
-import NodeCache from 'node-cache'; // අලුතින් එකතු කරන ලදී
+import NodeCache from 'node-cache';
 
 // 🌐 Web Server for Railway
 const server = http.createServer((req, res) => {
@@ -265,7 +265,7 @@ async function startBot() {
         logger: pino({ level: 'silent' }), 
         browser: ['RV Games Bot', 'Chrome', '1.0.0'],
         syncFullHistory: false,
-        msgRetryCounterCache // Decrypt දෝෂ මඟහැරීමට එකතු කළ කොටස
+        msgRetryCounterCache
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -277,14 +277,17 @@ async function startBot() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         if (!text.startsWith('.')) return; 
 
-        const senderJid = msg.key.participant || msg.key.remoteJid; 
+        const senderJid = msg.key.participant || msg.key.remoteJid || ""; 
         const chatJid = msg.key.remoteJid;
         
         // 🔒 PRIVATE BOT SECURITY CHECK
-        // මෙතනට ඔයා භාවිතා කරන නම්බර් එක අනිවාර්යයෙන් ඇතුළත් කරන්න.
-        const allowedNumbers = ['94701030330', '94740375946', '947XXXXXXXX']; 
+        // මෙතනට ඔයා භාවිතා කරන අනුමත නම්බර් ටික හරියටම දාන්න (country code එකත් එක්ක ලකුණු නැතුව)
+        const allowedNumbers = ['94701030330', '94740375946']; 
         
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
+
+        // Security Debug Log (නම්බර් එකේ ගැටලුවක් ආවොත් Railway Logs වල බලාගන්න)
+        console.log(`[SECURITY CHECK] Command received from: ${senderNumber}`);
 
         if (!allowedNumbers.includes(senderNumber)) {
             const privateMessage = 
@@ -383,7 +386,7 @@ async function startBot() {
 
                 if (task.progressMsgKey) {
                     const stoppedText = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼ेष ⚙️\n` +
                                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                                         `🛑 *Status: Process Stopped!*\n` +
                                         `⚠️ _දත්ත බාගත කිරීම හෝ යැවීම පරිශීලකයා විසින් නවතා දමා ඇත._\n\n` +
@@ -411,22 +414,18 @@ async function startBot() {
                 const pingStart = Date.now();
                 await fetch('https://httpbin.org/ping');
                 const pingTime = Date.now() - pingStart;
+                
                 const dlStart = Date.now();
                 const dlResponse = await fetch('https://httpbin.org/bytes/1048576'); 
-                const fileBuffer = await dlResponse.arrayBuffer();
+                await dlResponse.arrayBuffer();
                 const dlEnd = Date.now();
                 const dlDuration = (dlEnd - dlStart) / 1000;
                 const downloadSpeed = (8 / dlDuration).toFixed(2);
-                const ulStart = Date.now();
-                const ulEnd = Date.now();
-                const ulDuration = (ulEnd - ulStart) / 1000;
-                const uploadSpeed = (8 / ulDuration).toFixed(2);
-
+                
                 const speedText = `*⚡ RV GAMES SERVER SPEED* 🎮\n\n` +
                                   `🏓 *Ping:* \`${pingTime} ms\`\n` +
-                                  `📥 *Download Speed:* \`${downloadSpeed} Mbps\`\n` +
-                                  `📤 *Upload Speed:* \`${uploadSpeed} Mbps\`\n\n` +
-                                  `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
+                                  `📥 *Download Speed:* \`${downloadSpeed} Mbps\`\n\n` +
+                                  `_..._`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: speedText }, { quoted: msg });
             } catch (error) {
@@ -437,7 +436,7 @@ async function startBot() {
         // 5️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
-                `👑 *👑 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
+                `👑 *👑 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸參𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
                 `╔════════════════════╗\n` +
                 `┃    🤖 *MAIN COMMANDS MENU* \n` +
                 `╚════════════════════╝\n` +
@@ -451,12 +450,12 @@ async function startBot() {
                 `┃ ↳ _සිදු වෙමින් පවතින ඕනෑම ක්‍රියාවලියක් නතර කරයි._\n` +
                 `┃\n` +
                 `┃ ⚡ *.speed*\n` +
-                `┃ ↳ _සර්වර් එකේ සැබෑ DL/UL වේගය මනියි._\n` +
+                `┃ ↳ _සර්වර් එකේ සැබෑ DL වේගය මනියි._\n` +
                 `┃\n` +
                 `┃ 📜 *.menu*\n` +
                 `┃ ↳ _මෙම විධාන මෙනුව ලබා දෙයි._\n` +
                 `╚════════════════════╝\n\n` +
-                `_𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
+                `_晾𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
                 
             await sock.sendMessage(msg.key.remoteJid, { text: menuText }, { quoted: msg });
         }
