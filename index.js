@@ -167,18 +167,22 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             if (controller.signal.aborted) return;
 
             downloadedLength += chunk.length;
-            if (totalLength) {
-                const percent = ((downloadedLength / totalLength) * 100).toFixed(1);
-                const now = Date.now();
-                if (now - lastUpdateTime > 2000) { 
-                    lastUpdateTime = now;
-                    
-                    if (controller.signal.aborted) return; 
-                    
-                    const dlMB = (downloadedLength / (1024 * 1024)).toFixed(1);
+            const now = Date.now();
+            if (now - lastUpdateTime > 2000) { 
+                lastUpdateTime = now;
+                
+                if (controller.signal.aborted) return; 
+                
+                const dlMB = (downloadedLength / (1024 * 1024)).toFixed(1);
+                
+                if (totalLength) {
+                    const percent = ((downloadedLength / totalLength) * 100).toFixed(1);
                     const totMB = (totalLength / (1024 * 1024)).toFixed(1);
                     const bar = getProgressBar(percent);
                     const text = `📥 *Downloading:* ${fileName}\n📊 ${bar} ${percent}%\n📦 ${dlMB}MB / ${totMB}MB`;
+                    await sock.sendMessage(chatJid, { text: text, edit: progressMsg.key }).catch(() => {});
+                } else {
+                    const text = `📥 *Downloading:* ${fileName}\n📦 Downloaded: ${dlMB}MB (Size Unknown)`;
                     await sock.sendMessage(chatJid, { text: text, edit: progressMsg.key }).catch(() => {});
                 }
             }
@@ -196,7 +200,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         });
 
         let uploadPercent = 0;
-        const totalMB = (totalLength / (1024 * 1024)).toFixed(1);
+        const totalMB = totalLength ? (totalLength / (1024 * 1024)).toFixed(1) : (downloadedLength / (1024 * 1024)).toFixed(1);
 
         const uploadInterval = setInterval(async () => {
             if (controller.signal.aborted) {
@@ -274,19 +278,22 @@ async function startBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return; 
 
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        // TEXT EXTRACTION FIX
+        const text = msg.message?.conversation || 
+                     msg.message?.extendedTextMessage?.text || 
+                     msg.message?.imageMessage?.caption || 
+                     msg.message?.videoMessage?.caption || 
+                     "";
+                     
         if (!text.startsWith('.')) return; 
 
         const senderJid = msg.key.participant || msg.key.remoteJid || ""; 
         const chatJid = msg.key.remoteJid;
         
         // 🔒 PRIVATE BOT SECURITY CHECK
-        // මෙතනට ඔයා භාවිතා කරන අනුමත නම්බර් ටික හරියටම දාන්න (country code එකත් එක්ක ලකුණු නැතුව)
         const allowedNumbers = ['94701030330', '94740375946']; 
-        
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
-        // Security Debug Log (නම්බර් එකේ ගැටලුවක් ආවොත් Railway Logs වල බලාගන්න)
         console.log(`[SECURITY CHECK] Command received from: ${senderNumber}`);
 
         if (!allowedNumbers.includes(senderNumber)) {
@@ -327,8 +334,9 @@ async function startBot() {
                 const groups = await sock.groupFetchAllParticipating();
                 let targetGroupJid = null;
 
+                // GROUP SEARCH FIX (Using .includes instead of ===)
                 for (let jid in groups) {
-                    if (groups[jid].subject.toLowerCase() === groupName) {
+                    if (groups[jid].subject.toLowerCase().includes(groupName)) {
                         targetGroupJid = jid; break;
                     }
                 }
@@ -411,13 +419,13 @@ async function startBot() {
         else if (text.trim() === '.speed') {
             await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
             try {
+                // FETCH REPLACED WITH AXIOS
                 const pingStart = Date.now();
-                await fetch('https://httpbin.org/ping');
+                await axios.get('https://httpbin.org/ping');
                 const pingTime = Date.now() - pingStart;
                 
                 const dlStart = Date.now();
-                const dlResponse = await fetch('https://httpbin.org/bytes/1048576'); 
-                await dlResponse.arrayBuffer();
+                await axios.get('https://httpbin.org/bytes/1048576', { responseType: 'arraybuffer' }); 
                 const dlEnd = Date.now();
                 const dlDuration = (dlEnd - dlStart) / 1000;
                 const downloadSpeed = (8 / dlDuration).toFixed(2);
@@ -425,7 +433,7 @@ async function startBot() {
                 const speedText = `*⚡ RV GAMES SERVER SPEED* 🎮\n\n` +
                                   `🏓 *Ping:* \`${pingTime} ms\`\n` +
                                   `📥 *Download Speed:* \`${downloadSpeed} Mbps\`\n\n` +
-                                  `_..._`;
+                                  `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: speedText }, { quoted: msg });
             } catch (error) {
