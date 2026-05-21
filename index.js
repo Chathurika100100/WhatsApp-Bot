@@ -392,7 +392,7 @@ async function startBot() {
 
                 if (task.progressMsgKey) {
                     const stoppedText = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼ेष ⚙️\n` +
+                                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                                         `🛑 *Status: Process Stopped!*\n` +
                                         `⚠️ _දත්ත බාගත කිරීම හෝ යැවීම පරිශීලකයා විසින් නවතා දමා ඇත._\n\n` +
@@ -441,7 +441,7 @@ async function startBot() {
         // 5️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
-                `👑 *👑 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸參𝙸𝙰𝙻 𝙱𝙾𝚃* 👑\n\n` +
+                `*👑𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃*👑\n\n` +
                 `╔════════════════════╗\n` +
                 `┃    🤖 *MAIN COMMANDS MENU* \n` +
                 `╚════════════════════╝\n` +
