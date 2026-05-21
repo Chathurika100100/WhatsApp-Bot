@@ -86,7 +86,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         uploadInterval: null,
         tempFilePath: null,
         writer: null,
-        stream: null // 👈 Stream එක track කිරීමට අලුතෙන් එකතු කළා
+        stream: null 
     });
 
     let tempFilePath = '';
@@ -102,7 +102,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
             }
         });
 
-        // සක්‍රීය Task එකට response stream එක එකතු කිරීම
         if (activeTasks.has(chatJid)) {
             activeTasks.get(chatJid).stream = response.data;
         }
@@ -163,7 +162,6 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         }
 
         response.data.on('data', async (chunk) => {
-            // 👈 සලකා බැලිය යුතුම කොටස: Stop කර ඇත්නම් මැසේජ් යැවීම වහාම නතර කරයි
             if (controller.signal.aborted) return;
 
             downloadedLength += chunk.length;
@@ -173,7 +171,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
                 if (now - lastUpdateTime > 2000) { 
                     lastUpdateTime = now;
                     
-                    if (controller.signal.aborted) return; // මැසේජ් එක යවන්න කලින් නැවත පරික්ෂා කිරීම
+                    if (controller.signal.aborted) return; 
                     
                     const dlMB = (downloadedLength / (1024 * 1024)).toFixed(1);
                     const totMB = (totalLength / (1024 * 1024)).toFixed(1);
@@ -271,13 +269,28 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return; // 👈 Bot ගේම මැසේජ් වලට Bot ප්‍රතිචාර දැක්වීම වැළැක්වීමට
+        if (!msg.message || msg.key.fromMe) return; 
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         if (!text.startsWith('.')) return; 
 
         const senderJid = msg.key.participant || msg.key.remoteJid; 
         const chatJid = msg.key.remoteJid;
+        
+        // 🔒 PRIVATE BOT SECURITY CHECK (අවසර ලත් අංක පරීක්ෂාව)
+        const allowedNumbers = ['94701030330', '94740375946'];
+        const senderNumber = senderJid.split('@')[0]; // JID එකෙන් පිරිසිදු ෆෝන් නම්බර් එක වෙන් කර ගැනීම
+
+        if (!allowedNumbers.includes(senderNumber)) {
+            const privateMessage = 
+                `🔒 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙿𝚁𝙸𝚅𝙰𝚃𝙴 𝚂𝚈𝚂𝚃𝙴𝙼*\n\n` +
+                `❌ *Sorry, Access Denied!*\n` +
+                `ඔබට මෙම බොට්ගේ විධාන (Commands) භාවිතා කිරීමට අවසර නැත.\n\n` +
+                `_This bot is restricted to authorized users only._\n\n` +
+                `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
+            
+            return await sock.sendMessage(chatJid, { text: privateMessage }, { quoted: msg });
+        }
         
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
@@ -333,19 +346,19 @@ async function startBot() {
                 if (uploadedCount > 0 && !wasStopped) {
                     const summaryText = 
                         `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                        `       ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                         `┌────────────────────────\n` +
                         `│ ✅ Status: Done\n` +
                         `│ 📦 Total Parts: ${uploadedCount}\n` +
                         `│ ⏱️ Time Taken: ${totalTimeSeconds}s\n` +
                         `└────────────────────────\n\n` +
-                        `𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games`;
+                        `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
 
                     await sock.sendMessage(targetGroupJid, { text: summaryText });
                     await sock.sendMessage(msg.key.remoteJid, { text: `✅ සියලුම Parts (${uploadedCount}) ගෲප් එකට සාර්ථකව යවා Summary වාර්තාවද ලබා දෙන ලදී!`, edit: initialNotify.key });
                 } else if (wasStopped) {
-                    await sock.sendMessage(msg.key.remoteJid, { text: `🛑 ක්‍රියාවලිය නවත්වන ලද නිසා ගෲප් වාර්තා යැවීම අවලංගු කරන ලදී.`, edit: initialNotify.key });
+                    await sock.sendMessage(msg.key.remoteJid, { text: `🛑 **ක්‍රියාවලිය නවත්වන ලද නිසා ගෲප් වාර්තා යැවීම අවලංගු කරන ලදී.**`, edit: initialNotify.key });
                 }
 
             } catch (error) {
@@ -354,20 +367,18 @@ async function startBot() {
         }
 
         // 3️⃣ NEW: .stop Command
-        else if (text.trim().startsWith('.stop')) { // 👈 වඩාත් නිවැරදිව හඳුනාගැනීමට .startsWith එකතු කළා
+        else if (text.trim().startsWith('.stop')) { 
             if (activeTasks.has(chatJid)) {
                 const task = activeTasks.get(chatJid);
                 
-                // 1. Abort Request, Stream & Clear Interval
                 task.controller.abort();
                 if (task.uploadInterval) clearInterval(task.uploadInterval);
-                if (task.stream) { try { task.stream.destroy(); } catch(e){} } // 👈 Stream එක බලහත්කාරයෙන් නවත්වයි
+                if (task.stream) { try { task.stream.destroy(); } catch(e){} } 
                 if (task.writer) { try { task.writer.destroy(); } catch(e){} }
 
-                // 2. Edit Progress Msg to "Stopped"
                 if (task.progressMsgKey) {
                     const stoppedText = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                                        `       ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                                         `🛑 *Status: Process Stopped!*\n` +
                                         `⚠️ _දත්ත බාගත කිරීම හෝ යැවීම පරිශීලකයා විසින් නවතා දමා ඇත._\n\n` +
@@ -375,7 +386,6 @@ async function startBot() {
                     await sock.sendMessage(chatJid, { text: stoppedText, edit: task.progressMsgKey }).catch(() => {});
                 }
 
-                // 3. Clean Files
                 setTimeout(() => {
                     if (task.tempFilePath && fs.existsSync(task.tempFilePath)) {
                         try { fs.unlinkSync(task.tempFilePath); } catch (e) {}
