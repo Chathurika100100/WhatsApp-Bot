@@ -278,7 +278,6 @@ async function startBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return; 
 
-        // TEXT EXTRACTION FIX
         const text = msg.message?.conversation || 
                      msg.message?.extendedTextMessage?.text || 
                      msg.message?.imageMessage?.caption || 
@@ -290,8 +289,8 @@ async function startBot() {
         const senderJid = msg.key.participant || msg.key.remoteJid || ""; 
         const chatJid = msg.key.remoteJid;
         
-        // 🔒 PRIVATE BOT SECURITY CHECK
-        const allowedNumbers = ['94701030330', '94740375946']; 
+        // 🔒 PRIVATE BOT SECURITY CHECK (ඔයාගේ JID එක මෙතනට Add කළා)
+        const allowedNumbers = ['94701030330', '94740375946', '212038592811214']; 
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
         console.log(`[SECURITY CHECK] Command received from: ${senderNumber}`);
@@ -334,7 +333,6 @@ async function startBot() {
                 const groups = await sock.groupFetchAllParticipating();
                 let targetGroupJid = null;
 
-                // GROUP SEARCH FIX (Using .includes instead of ===)
                 for (let jid in groups) {
                     if (groups[jid].subject.toLowerCase().includes(groupName)) {
                         targetGroupJid = jid; break;
@@ -419,7 +417,6 @@ async function startBot() {
         else if (text.trim() === '.speed') {
             await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
             try {
-                // FETCH REPLACED WITH AXIOS
                 const pingStart = Date.now();
                 await axios.get('https://httpbin.org/ping');
                 const pingTime = Date.now() - pingStart;
