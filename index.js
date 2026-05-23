@@ -290,7 +290,7 @@ async function startBot() {
         const chatJid = msg.key.remoteJid;
         
         // 🔒 PRIVATE BOT SECURITY CHECK (ඔයාගේ JID එක මෙතනට Add කළා)
-        const allowedNumbers = ['94701030330', '94740375946', '212038592811214']; 
+        const allowedNumbers = ['94701030330', '94740375946', '212038592811214', '']; 
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
         console.log(`[SECURITY CHECK] Command received from: ${senderNumber}`);
@@ -417,24 +417,39 @@ async function startBot() {
         else if (text.trim() === '.speed') {
             await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
             try {
+                // 🏓 Ping Check
                 const pingStart = Date.now();
-                await axios.get('https://httpbin.org/ping');
+                await axios.get('https://google.com');
                 const pingTime = Date.now() - pingStart;
                 
+                // 📥 Download Speed (1MB බාගත කර පරීක්ෂා කිරීම)
                 const dlStart = Date.now();
                 await axios.get('https://httpbin.org/bytes/1048576', { responseType: 'arraybuffer' }); 
                 const dlEnd = Date.now();
                 const dlDuration = (dlEnd - dlStart) / 1000;
-                const downloadSpeed = (8 / dlDuration).toFixed(2);
+                const downloadSpeed = (8 / dlDuration).toFixed(2); // Mbps වලින්
                 
+                // 📤 Upload Speed (1MB දත්ත ප්‍රමාණයක් යවා පරීක්ෂා කිරීම)
+                const payload = 'A'.repeat(1048576); // 1MB ප්‍රමාණයේ Dummy Text එකක්
+                const ulStart = Date.now();
+                await axios.post('https://httpbin.org/post', payload, {
+                    headers: { 'Content-Type': 'text/plain' }
+                });
+                const ulEnd = Date.now();
+                const ulDuration = (ulEnd - ulStart) / 1000;
+                const uploadSpeed = (8 / ulDuration).toFixed(2); // Mbps වලින්
+                
+                // 📊 ප්‍රතිඵලය
                 const speedText = `*⚡ RV GAMES SERVER SPEED* 🎮\n\n` +
                                   `🏓 *Ping:* \`${pingTime} ms\`\n` +
-                                  `📥 *Download Speed:* \`${downloadSpeed} Mbps\`\n\n` +
+                                  `📥 *Download Speed:* \`${downloadSpeed} Mbps\`\n` +
+                                  `📤 *Upload Speed:* \`${uploadSpeed} Mbps\`\n\n` +
                                   `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: speedText }, { quoted: msg });
             } catch (error) {
-                await sock.sendMessage(msg.key.remoteJid, { text: '❌ Speed test දෝෂයකි.' }, { quoted: msg });
+                console.error("Speed test Error:", error.message);
+                await sock.sendMessage(msg.key.remoteJid, { text: `❌ Speed test දෝෂයකි: ${error.message}` }, { quoted: msg });
             }
         }
 
