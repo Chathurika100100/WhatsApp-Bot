@@ -289,7 +289,7 @@ async function startBot() {
         const senderJid = msg.key.participant || msg.key.remoteJid || ""; 
         const chatJid = msg.key.remoteJid;
         
-        // 🔒 PRIVATE BOT SECURITY CHECK (ඔයාගේ JID එක මෙතනට Add කළා)
+        // 🔒 PRIVATE BOT SECURITY CHECK
         const allowedNumbers = ['94701030330', '94740375946', '212038592811214', '']; 
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
@@ -453,35 +453,7 @@ async function startBot() {
             }
         }
 
-        // 5️⃣ .menu Command 
-        else if (text.trim() === '.menu') {
-            const menuText = 
-                `*👑𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃*👑\n\n` +
-                `╔════════════════════╗\n` +
-                `┃    🤖 *MAIN COMMANDS MENU* \n` +
-                `╚════════════════════╝\n` +
-                `┃ 📥 *.si [link 1] [link 2]*\n` +
-                `┃ ↳ _ලින්ක් කීපයක් වුවද එකවර Inbox එවයි._\n` +
-                `┃\n` +
-                `┃ 👥 *.sg [group name] [link 1] [link 2]*\n` +
-                `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල්ස් සහ Summary වාර්තාව යවයි._\n` +
-                `┃\n` +
-                `┃ 🛑 *.stop*\n` +
-                `┃ ↳ _සිදු වෙමින් පවතින ඕනෑම ක්‍රියාවලියක් නතර කරයි._\n` +
-                `┃\n` +
-                `┃ ⚡ *.speed*\n` +
-                `┃ ↳ _සර්වර් එකේ සැබෑ DL වේගය මනියි._\n` +
-                `┃\n` +
-                `┃ 📜 *.menu*\n` +
-                `┃ ↳ _මෙම විධාන මෙනුව ලබා දෙයි._\n` +
-                `╚════════════════════╝\n\n` +
-                `_晾𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
-                
-            await sock.sendMessage(msg.key.remoteJid, { text: menuText }, { quoted: msg });
-        }
-    });
-
-    // 6️⃣ .dc Command (Disk Cleaner)
+        // 5️⃣ .dc Command (Disk Cleaner)
         else if (text.trim() === '.dc') {
             await sock.sendMessage(msg.key.remoteJid, { text: '🧹 RV Games සර්වර් එකේ තාවකාලික ෆයිල් ඉවත් කරමින් පවතී...' }, { quoted: msg });
             try {
@@ -518,6 +490,37 @@ async function startBot() {
                 await sock.sendMessage(msg.key.remoteJid, { text: `❌ Disk එක Clear කිරීමේදී දෝෂයක් ඇති විය: ${error.message}` }, { quoted: msg });
             }
         }
+
+        // 6️⃣ .menu Command 
+        else if (text.trim() === '.menu') {
+            const menuText = 
+                `*👑𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃*👑\n\n` +
+                `╔════════════════════╗\n` +
+                `┃    🤖 *MAIN COMMANDS MENU* \n` +
+                `╚════════════════════╝\n` +
+                `┃ 📥 *.si [link 1] [link 2]*\n` +
+                `┃ ↳ _ලින්ක් කීපයක් වුවද එකවර Inbox එවයි._\n` +
+                `┃\n` +
+                `┃ 👥 *.sg [group name] [link 1] [link 2]*\n` +
+                `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල්ස් සහ Summary වාර්තාව යවයි._\n` +
+                `┃\n` +
+                `┃ 🛑 *.stop*\n` +
+                `┃ ↳ _සිදු වෙමින් පවතින ඕනෑම ක්‍රියාවලියක් නතර කරයි._\n` +
+                `┃\n` +
+                `┃ ⚡ *.speed*\n` +
+                `┃ ↳ _සර්වර් එකේ සැබෑ DL වේගය මනියි._\n` +
+                `┃\n` +
+                `┃ 🧹 *.dc*\n` +
+                `┃ ↳ _සර්වර් එකේ ඇති තාවකාලික ෆයිල් මකා දමයි._\n` +
+                `┃\n` +
+                `┃ 📜 *.menu*\n` +
+                `┃ ↳ _මෙම විධාන මෙනුව ලබා දෙයි._\n` +
+                `╚════════════════════╝\n\n` +
+                `_晾𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
+                
+            await sock.sendMessage(msg.key.remoteJid, { text: menuText }, { quoted: msg });
+        }
+    });
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
