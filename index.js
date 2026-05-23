@@ -490,8 +490,17 @@ async function startBot() {
                 await sock.sendMessage(msg.key.remoteJid, { text: `❌ Disk එක Clear කිරීමේදී දෝෂයක් ඇති විය: ${error.message}` }, { quoted: msg });
             }
         }
-
-        // 6️⃣ .menu Command 
+        // 6️⃣ .crash Command (Bot Offline කර නවතා දැමීම)
+        else if (text.trim() === '.crash') {
+            await sock.sendMessage(msg.key.remoteJid, { text: '💀 *RV Games Bot Offline කරනු ලදී.*\n🚫 _සර්වර් එක තවදුරටත් ක්‍රියාත්මක නොවේ._' }, { quoted: msg });
+            console.log("💀 Manual Crash triggered: Bot stopped.");
+            
+            // සර්වර් එක සම්පූර්ණයෙන්ම නතර කරයි (Restart නොවනු ඇත)
+            setTimeout(() => {
+                process.exit(0); 
+            }, 1000);
+        }
+        // 7️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
                 `*👑𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃*👑\n\n` +
