@@ -481,6 +481,44 @@ async function startBot() {
         }
     });
 
+    // 6️⃣ .dc Command (Disk Cleaner)
+        else if (text.trim() === '.dc') {
+            await sock.sendMessage(msg.key.remoteJid, { text: '🧹 RV Games සර්වර් එකේ තාවකාලික ෆයිල් ඉවත් කරමින් පවතී...' }, { quoted: msg });
+            try {
+                const directory = './'; // Main directory එක
+                const files = fs.readdirSync(directory);
+                let deletedCount = 0;
+                let freedSpace = 0;
+
+                files.forEach(file => {
+                    const filePath = path.join(directory, file);
+                    const stat = fs.statSync(filePath);
+
+                    // ⚠️ බොට්ව දුවන්න ඕනෙම කරන වැදගත් ෆයිල් සහ ෆෝල්ඩර් ඩිලීට් වීම වැළැක්වීමට (White-list)
+                    const protectedFiles = ['index.js', 'package.json', 'package-lock.json', 'node_modules', 'bot_session', '.env', '.gitignore', '.git'];
+
+                    if (!protectedFiles.includes(file) && stat.isFile()) {
+                        freedSpace += stat.size; // අයින් කරන සයිස් එක එකතු කරගන්නවා
+                        fs.unlinkSync(filePath); // ෆයිල් එක ඩිලීට් කරනවා
+                        deletedCount++;
+                    }
+                });
+
+                const freedMB = (freedSpace / (1024 * 1024)).toFixed(2);
+                
+                const clearText = `*🧹 RV GAMES DISK CLEANER* ⚙️\n\n` +
+                                  `✅ *Status:* Disk Cleaned Successfully!\n` +
+                                  `🗑️ *Removed Files:* \`${deletedCount} files\`\n` +
+                                  `📦 *Freed Space:* \`${freedMB} MB\`\n\n` +
+                                  `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
+
+                await sock.sendMessage(msg.key.remoteJid, { text: clearText }, { quoted: msg });
+            } catch (error) {
+                console.error("Disk Cleaner Error:", error.message);
+                await sock.sendMessage(msg.key.remoteJid, { text: `❌ Disk එක Clear කිරීමේදී දෝෂයක් ඇති විය: ${error.message}` }, { quoted: msg });
+            }
+        }
+
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
