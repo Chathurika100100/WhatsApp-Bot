@@ -6,7 +6,8 @@ import path from 'path';
 import http from 'http'; 
 import axios from 'axios'; 
 import NodeCache from 'node-cache';
-import * as cheerio from 'cheerio'; // 🔍 Cheerio සීරපර් එක එකතු කරන ලදී
+import * as cheerio from 'cheerio'; 
+import puppeteer from 'puppeteer'; // 🔍 Puppeteer එකතු කරන ලදී
 
 // 🌐 Web Server for Railway
 const server = http.createServer((req, res) => {
@@ -19,7 +20,8 @@ server.listen(PORT, () => {
 
 const authFolder = './bot_session';
 const activeTasks = new Map(); 
-const msgRetryCounterCache = new NodeCache(); // මැසේජ් Decrypt වීමේ ගැටලු මඟහරවා ගැනීමට
+const fgSearchState = new Map(); // 🔍 FitGirl Search Result Selection මතක තබාගැනීමට
+const msgRetryCounterCache = new NodeCache(); 
 
 // 📂 Session ID Setup
 function setupSession() {
@@ -75,6 +77,51 @@ function getExtensionFromMime(mimeType) {
         'text/plain': '.txt'
     };
     return map[mimeType] || '.bin';
+}
+
+// 🔍 1. FuckingFast Pastebin URL එක සෙවීම
+async function getFuckingFastPasteUrl(gameUrl) {
+    try {
+        const { data } = await axios.get(gameUrl);
+        const $ = cheerio.load(data);
+        let pasteUrl = null;
+        $('li').each((i, el) => {
+            if ($(el).text().includes('FuckingFast')) {
+                pasteUrl = $(el).find('a[href*="paste.fitgirl-repacks.site"]').attr('href');
+            }
+        });
+        return pasteUrl;
+    } catch (error) {
+        console.error('Game page load error:', error.message);
+        return null;
+    }
+}
+
+// 🔍 2. Puppeteer මගින් Pastebin ලින්ක් Decrypt කිරීම
+async function extractDirectLinks(pasteUrl) {
+    if (!pasteUrl) return [];
+    // --disable-dev-shm-usage Railway සර්වර් වල crash වීම අවම කරයි
+    const browser = await puppeteer.launch({ 
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process'] 
+    });
+    try {
+        const page = await browser.newPage();
+        await page.goto(pasteUrl, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#cleartext a', { timeout: 15000 });
+        const links = await page.evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('#cleartext a'));
+            return anchors
+                .map(a => a.href)
+                .filter(href => href.includes('.rar') || href.includes('.bin') || href.includes('fuckingfast'));
+        });
+        await browser.close();
+        return links;
+    } catch (error) {
+        console.error('Pastebin scrape error:', error.message);
+        await browser.close();
+        return [];
+    }
 }
 
 // 📥 Heavy Lift Downloader & Auto Content Displayer
@@ -285,7 +332,8 @@ async function startBot() {
                      msg.message?.videoMessage?.caption || 
                      "";
                      
-        if (!text.startsWith('.')) return; 
+        // 🔍 Commands (.) හෝ අංක (1-5) පමණක් ඉඩ දීම
+        if (!text.startsWith('.') && !/^[1-5]$/.test(text.trim())) return; 
 
         const senderJid = msg.key.participant || msg.key.remoteJid || ""; 
         const chatJid = msg.key.remoteJid;
@@ -294,7 +342,7 @@ async function startBot() {
         const allowedNumbers = ['94701030330', '94740375946', '212038592811214', '275698514133039']; 
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
-        console.log(`[SECURITY CHECK] Command received from: ${senderNumber}`);
+        console.log(`[SECURITY CHECK] Message received from: ${senderNumber}`);
 
         if (!allowedNumbers.includes(senderNumber)) {
             const privateMessage = 
@@ -309,6 +357,46 @@ async function startBot() {
         
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
+
+        // 🔍 0️⃣ FitGirl Search Result Selection (1-5) ක්‍රියාත්මක කිරීම
+        if (/^[1-5]$/.test(text.trim()) && fgSearchState.has(chatJid)) {
+            const selectedIndex = parseInt(text.trim()) - 1;
+            const results = fgSearchState.get(chatJid);
+            
+            if (!results[selectedIndex]) return; 
+
+            const selectedGame = results[selectedIndex];
+            fgSearchState.delete(chatJid); // තේරීමෙන් පසු State එක මකා දැමීම
+
+            const fetchingMsg = await sock.sendMessage(chatJid, { text: `⏳ *'${selectedGame.title}' සඳහා Direct Links ලබා ගනිමින් පවතී...*\n_කරුණාකර මඳ වේලාවක් රැඳී සිටින්න._` }, { quoted: msg });
+
+            const pasteUrl = await getFuckingFastPasteUrl(selectedGame.link);
+            if (!pasteUrl) {
+                return await sock.sendMessage(chatJid, { text: '❌ කණගාටුයි, මෙම ගේම් එක සඳහා FuckingFast ලින්ක් සොයාගත නොහැකි විය.', edit: fetchingMsg.key });
+            }
+
+            const downloadLinks = await extractDirectLinks(pasteUrl);
+
+            if (downloadLinks.length > 0) {
+                let replyText = `📥 *DIRECT DOWNLOAD LINKS: (Fucking Fast)*\n\n🎮 *Game:* ${selectedGame.title}\n\n`;
+                
+                downloadLinks.forEach((link) => {
+                    let fileName = link.split('/').pop(); 
+                    try {
+                        fileName = decodeURIComponent(fileName); 
+                    } catch (e) {}
+                    
+                    // ඔයා ඉල්ලුව විදිහට File Name එක සහ Link එක ලස්සනට සෙට් කිරීම
+                    replyText += `📄 *${fileName}*\n🔗 ${link}\n\n`;
+                });
+                replyText += `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
+                
+                await sock.sendMessage(chatJid, { text: replyText, edit: fetchingMsg.key });
+            } else {
+                await sock.sendMessage(chatJid, { text: '❌ කණගාටුයි, Direct links ලබා ගැනීමට නොහැකි විය.', edit: fetchingMsg.key });
+            }
+            return; 
+        }
 
         // 1️⃣ .si Command 
         if (text.startsWith('.si ')) {
@@ -418,29 +506,25 @@ async function startBot() {
         else if (text.trim() === '.speed') {
             await sock.sendMessage(msg.key.remoteJid, { text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...' }, { quoted: msg });
             try {
-                // 🏓 Ping Check
                 const pingStart = Date.now();
                 await axios.get('https://google.com');
                 const pingTime = Date.now() - pingStart;
                 
-                // 📥 Download Speed (1MB බාගත කර පරීක්ෂා කිරීම)
                 const dlStart = Date.now();
                 await axios.get('https://httpbin.org/bytes/1048576', { responseType: 'arraybuffer' }); 
                 const dlEnd = Date.now();
                 const dlDuration = (dlEnd - dlStart) / 1000;
-                const downloadSpeed = (8 / dlDuration).toFixed(2); // Mbps වලින්
+                const downloadSpeed = (8 / dlDuration).toFixed(2); 
                 
-                // 📤 Upload Speed (1MB දත්ත ප්‍රමාණයක් යවා පරීක්ෂා කිරීම)
-                const payload = 'A'.repeat(1048576); // 1MB ප්‍රමාණයේ Dummy Text එකක්
+                const payload = 'A'.repeat(1048576); 
                 const ulStart = Date.now();
                 await axios.post('https://httpbin.org/post', payload, {
                     headers: { 'Content-Type': 'text/plain' }
                 });
                 const ulEnd = Date.now();
                 const ulDuration = (ulEnd - ulStart) / 1000;
-                const uploadSpeed = (8 / ulDuration).toFixed(2); // Mbps වලින්
+                const uploadSpeed = (8 / ulDuration).toFixed(2); 
                 
-                // 📊 ප්‍රතිඵලය
                 const speedText = `*⚡ RV GAMES SERVER SPEED* 🎮\n\n` +
                                   `🏓 *Ping:* \`${pingTime} ms\`\n` +
                                   `📥 *Download Speed:* \`${downloadSpeed} Mbps\`\n` +
@@ -458,7 +542,7 @@ async function startBot() {
         else if (text.trim() === '.dc') {
             await sock.sendMessage(msg.key.remoteJid, { text: '🧹 RV Games සර්වර් එකේ තාවකාලික ෆයිල් ඉවත් කරමින් පවතී...' }, { quoted: msg });
             try {
-                const directory = './'; // Main directory එක
+                const directory = './'; 
                 const files = fs.readdirSync(directory);
                 let deletedCount = 0;
                 let freedSpace = 0;
@@ -467,12 +551,11 @@ async function startBot() {
                     const filePath = path.join(directory, file);
                     const stat = fs.statSync(filePath);
 
-                    // ⚠️ බොට්ව දුවන්න ඕනෙම කරන වැදගත් ෆයිල් සහ ෆෝල්ඩර් ඩිලීට් වීම වැළැක්වීමට (White-list)
                     const protectedFiles = ['index.js', 'package.json', 'package-lock.json', 'node_modules', 'bot_session', '.env', '.gitignore', '.git'];
 
                     if (!protectedFiles.includes(file) && stat.isFile()) {
-                        freedSpace += stat.size; // අයින් කරන සයිස් එක එකතු කරගන්නවා
-                        fs.unlinkSync(filePath); // ෆයිල් එක ඩිලීට් කරනවා
+                        freedSpace += stat.size; 
+                        fs.unlinkSync(filePath); 
                         deletedCount++;
                     }
                 });
@@ -492,18 +575,17 @@ async function startBot() {
             }
         }
 
-        // 6️⃣ .crash Command (Bot Offline කර නවතා දැමීම)
+        // 6️⃣ .crash Command 
         else if (text.trim() === '.crash') {
             await sock.sendMessage(msg.key.remoteJid, { text: '💀 *RV Games Bot Offline කරනු ලදී.*\n🚫 _සර්වර් එක තවදුරටත් ක්‍රියාත්මක නොවේ._' }, { quoted: msg });
             console.log("💀 Manual Crash triggered: Bot stopped.");
             
-            // සර්වර් එක සම්පූර්ණයෙන්ම නතර කරයි (Restart නොවනු ඇත)
             setTimeout(() => {
                 process.exit(0); 
             }, 1000);
         }
 
-        // 🔍 8️⃣ .fg Command (FitGirl Repacks Search)
+        // 🔍 8️⃣ .fg Command (FitGirl Repacks Search) - UPDATED!
         else if (text.startsWith('.fg ')) {
             const searchQuery = text.replace('.fg ', '').trim();
             if (!searchQuery) return await sock.sendMessage(chatJid, { text: '❌ කරුණාකර ගේම් එකේ නම ඇතුළත් කරන්න. \nඋදා: *.fg Far Cry 3*' }, { quoted: msg });
@@ -511,7 +593,6 @@ async function startBot() {
             const searchMsg = await sock.sendMessage(chatJid, { text: `🔍 *FitGirl වෙබ් අඩවියේ '${searchQuery}' සොයමින් පවතී...*` }, { quoted: msg });
 
             try {
-                // FitGirl සයිට් එකේ Search URL එක නිර්මාණය කිරීම
                 const searchUrl = `https://fitgirl-repacks.site/?s=${encodeURIComponent(searchQuery)}`;
                 
                 const response = await axios.get(searchUrl, {
@@ -521,9 +602,8 @@ async function startBot() {
                 const $ = cheerio.load(response.data);
                 const results = [];
 
-                // සයිට් එකේ තියෙන Article tags වලින් Result එක හොයාගැනීම
                 $('article').each((i, el) => {
-                    if (i >= 5) return false; // මුල් ප්‍රතිඵල 5 පමණක් ගැනීම
+                    if (i >= 5) return false; 
                     
                     const titleElement = $(el).find('h1.entry-title a');
                     const title = titleElement.text().trim();
@@ -535,17 +615,20 @@ async function startBot() {
                 });
 
                 if (results.length === 0) {
-                    return await sock.sendMessage(chatJid, { text: `❌ '${searchQuery}' නමින් ගේම් එකක් FitGirl සයිට් එකේ සොයාගත නොහැකි විය. වෙනත් නමක් උත්සාහ කරන්න.`, edit: searchMsg.key });
+                    return await sock.sendMessage(chatJid, { text: `❌ '${searchQuery}' නමින් ගේම් එකක් FitGirl සයිට් එකේ සොයාගත නොහැකි විය. වෙනත් නමක් උත්සාහ একা කරන්න.`, edit: searchMsg.key });
                 }
 
-                // ප්‍රතිඵල ලස්සනට සකස් කිරීම
+                // 🔍 State එක save කිරීම 
+                fgSearchState.set(chatJid, results);
+
                 let replyText = `*🎯 FITGIRL SEARCH RESULTS*\n\n🔍 *Search:* _${searchQuery}_\n\n`;
                 results.forEach((game, index) => {
                     replyText += `*${index + 1}.* ${game.title}\n🔗 ${game.link}\n\n`;
                 });
-                replyText += `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
+                
+                // 🔍 User ට අංකයක් තෝරන්න කියන පණිවිඩය
+                replyText += `👇 *Direct Links ලබා ගැනීම සඳහා අදාළ අංකය (1-5) Reply කරන්න (හෝ Type කරන්න).* \n\n*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
 
-                // ප්‍රතිඵලය යැවීම
                 await sock.sendMessage(chatJid, { text: replyText, edit: searchMsg.key });
 
             } catch (error) {
