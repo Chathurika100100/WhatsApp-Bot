@@ -290,7 +290,7 @@ async function startBot() {
         const chatJid = msg.key.remoteJid;
         
         // 🔒 PRIVATE BOT SECURITY CHECK
-        const allowedNumbers = ['94701030330', '94740375946', '212038592811214', '']; 
+        const allowedNumbers = ['94701030330', '94740375946', '212038592811214', '275698514133039']; 
         const senderNumber = senderJid.split('@')[0].split(':')[0]; 
 
         console.log(`[SECURITY CHECK] Command received from: ${senderNumber}`);
