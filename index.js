@@ -7,7 +7,7 @@ import http from 'http';
 import axios from 'axios'; 
 import NodeCache from 'node-cache';
 import * as cheerio from 'cheerio'; 
-import puppeteer from 'puppeteer'; // 🔍 Puppeteer එකතු කරන ලදී
+import puppeteer from 'puppeteer'; 
 
 // 🌐 Web Server for Railway
 const server = http.createServer((req, res) => {
@@ -100,10 +100,17 @@ async function getFuckingFastPasteUrl(gameUrl) {
 // 🔍 2. Puppeteer මගින් Pastebin ලින්ක් Decrypt කිරීම
 async function extractDirectLinks(pasteUrl) {
     if (!pasteUrl) return [];
-    // --disable-dev-shm-usage Railway සර්වර් වල crash වීම අවම කරයි
+    
+    // Railway සහ Cloud ප්ලැට්ෆෝම් වල ක්‍රියාත්මක වීමට ප්‍රශස්ත කරන ලද Args
     const browser = await puppeteer.launch({ 
-        headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process'] 
+        headless: true,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage', 
+            '--single-process',
+            '--disable-no-sandbox-and-elevated-privileges'
+        ] 
     });
     try {
         const page = await browser.newPage();
@@ -214,6 +221,7 @@ async function handleDownloadAndUpload(url, sock, msg, sendToJid) {
         response.data.on('data', async (chunk) => {
             if (controller.signal.aborted) return;
 
+            navigator_chunk:
             downloadedLength += chunk.length;
             const now = Date.now();
             if (now - lastUpdateTime > 2000) { 
@@ -386,7 +394,6 @@ async function startBot() {
                         fileName = decodeURIComponent(fileName); 
                     } catch (e) {}
                     
-                    // ඔයා ඉල්ලුව විදිහට File Name එක සහ Link එක ලස්සනට සෙට් කිරීම
                     replyText += `📄 *${fileName}*\n🔗 ${link}\n\n`;
                 });
                 replyText += `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
@@ -449,7 +456,7 @@ async function startBot() {
                 if (uploadedCount > 0 && !wasStopped) {
                     const summaryText = 
                         `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                        `         ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                        `          ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                         `┌────────────────────────\n` +
                         `│ ✅ Status: Done\n` +
@@ -481,7 +488,7 @@ async function startBot() {
 
                 if (task.progressMsgKey) {
                     const stoppedText = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                                        `         ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                                        `          ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                                         `🛑 *Status: Process Stopped!*\n` +
                                         `⚠️ _දත්ත බාගත කිරීම හෝ යැවීම පරිශීලකයා විසින් නවතා දමා ඇත._\n\n` +
@@ -496,7 +503,7 @@ async function startBot() {
                 }, 1000);
 
                 activeTasks.delete(chatJid);
-                await sock.sendMessage(chatJid, { text: '✅ සියලුම සක්‍රීය ඩවුන්ලෝඩ්/අප්ලෝඩ් ක්‍රියාවලීන් නතර කර දත්ත Username ඉවත් කරන ලදී!' }, { quoted: msg });
+                await sock.sendMessage(chatJid, { text: '✅ සියලුම සක්‍රීය ඩවුන්ලෝඩ්/අප්ලෝඩ් ක්‍රියාවලීන් නතර කර දත්ත ඉවත් කරන ලදී!' }, { quoted: msg });
             } else {
                 await sock.sendMessage(chatJid, { text: '❌ මේ මොහොතේ කිසිදු ෆයිල් එකක් බාගත වෙමින් පවතින්නේ නැත.' }, { quoted: msg });
             }
@@ -585,7 +592,7 @@ async function startBot() {
             }, 1000);
         }
 
-        // 🔍 8️⃣ .fg Command (FitGirl Repacks Search) - UPDATED!
+        // 🔍 8️⃣ .fg Command (FitGirl Repacks Search)
         else if (text.startsWith('.fg ')) {
             const searchQuery = text.replace('.fg ', '').trim();
             if (!searchQuery) return await sock.sendMessage(chatJid, { text: '❌ කරුණාකර ගේම් එකේ නම ඇතුළත් කරන්න. \nඋදා: *.fg Far Cry 3*' }, { quoted: msg });
@@ -615,7 +622,7 @@ async function startBot() {
                 });
 
                 if (results.length === 0) {
-                    return await sock.sendMessage(chatJid, { text: `❌ '${searchQuery}' නමින් ගේම් එකක් FitGirl සයිට් එකේ සොයාගත නොහැකි විය. වෙනත් නමක් උත්සාහ একা කරන්න.`, edit: searchMsg.key });
+                    return await sock.sendMessage(chatJid, { text: `❌ '${searchQuery}' නමින් ගේම් එකක් FitGirl සයිට් එකේ සොයාගත නොහැකි විය. වෙනත් නමක් උත්සාහ කරන්න.`, edit: searchMsg.key });
                 }
 
                 // 🔍 State එක save කිරීම 
