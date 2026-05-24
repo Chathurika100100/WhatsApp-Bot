@@ -525,7 +525,7 @@ async function startBot() {
                 `┃ 📜 *.menu*\n` +
                 `┃ ↳ _මෙම විධාන මෙනුව ලබා දෙයි._\n` +
                 `╚════════════════════╝\n\n` +
-                `_晾𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  𝚁𝚅 𝙶𝙰𝙼𝙴𝚂_`;
+                `_*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 RV Games*_`;
                 
             await sock.sendMessage(msg.key.remoteJid, { text: menuText }, { quoted: msg });
         }
