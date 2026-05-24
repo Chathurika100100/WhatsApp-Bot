@@ -6,6 +6,7 @@ import path from 'path';
 import http from 'http'; 
 import axios from 'axios'; 
 import NodeCache from 'node-cache';
+import * as cheerio from 'cheerio'; // 🔍 Cheerio සීරපර් එක එකතු කරන ලදී
 
 // 🌐 Web Server for Railway
 const server = http.createServer((req, res) => {
@@ -360,7 +361,7 @@ async function startBot() {
                 if (uploadedCount > 0 && !wasStopped) {
                     const summaryText = 
                         `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                        `         ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                         `┌────────────────────────\n` +
                         `│ ✅ Status: Done\n` +
@@ -392,7 +393,7 @@ async function startBot() {
 
                 if (task.progressMsgKey) {
                     const stoppedText = `┏━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                                        `        ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
+                                        `         ⚙️ 𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 ⚙️\n` +
                                         `┗━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
                                         `🛑 *Status: Process Stopped!*\n` +
                                         `⚠️ _දත්ත බාගත කිරීම හෝ යැවීම පරිශීලකයා විසින් නවතා දමා ඇත._\n\n` +
@@ -407,7 +408,7 @@ async function startBot() {
                 }, 1000);
 
                 activeTasks.delete(chatJid);
-                await sock.sendMessage(chatJid, { text: '✅ සියලුම සක්‍රීය ඩවුන්ලෝඩ්/අප්ලෝඩ් ක්‍රියාවලීන් නතර කර දත්ත ඉවත් කරන ලදී!' }, { quoted: msg });
+                await sock.sendMessage(chatJid, { text: '✅ සියලුම සක්‍රීය ඩවුන්ලෝඩ්/අප්ලෝඩ් ක්‍රියාවලීන් නතර කර දත්ත Username ඉවත් කරන ලදී!' }, { quoted: msg });
             } else {
                 await sock.sendMessage(chatJid, { text: '❌ මේ මොහොතේ කිසිදු ෆයිල් එකක් බාගත වෙමින් පවතින්නේ නැත.' }, { quoted: msg });
             }
@@ -490,6 +491,7 @@ async function startBot() {
                 await sock.sendMessage(msg.key.remoteJid, { text: `❌ Disk එක Clear කිරීමේදී දෝෂයක් ඇති විය: ${error.message}` }, { quoted: msg });
             }
         }
+
         // 6️⃣ .crash Command (Bot Offline කර නවතා දැමීම)
         else if (text.trim() === '.crash') {
             await sock.sendMessage(msg.key.remoteJid, { text: '💀 *RV Games Bot Offline කරනු ලදී.*\n🚫 _සර්වර් එක තවදුරටත් ක්‍රියාත්මක නොවේ._' }, { quoted: msg });
@@ -500,6 +502,58 @@ async function startBot() {
                 process.exit(0); 
             }, 1000);
         }
+
+        // 🔍 8️⃣ .fg Command (FitGirl Repacks Search)
+        else if (text.startsWith('.fg ')) {
+            const searchQuery = text.replace('.fg ', '').trim();
+            if (!searchQuery) return await sock.sendMessage(chatJid, { text: '❌ කරුණාකර ගේම් එකේ නම ඇතුළත් කරන්න. \nඋදා: *.fg Far Cry 3*' }, { quoted: msg });
+
+            const searchMsg = await sock.sendMessage(chatJid, { text: `🔍 *FitGirl වෙබ් අඩවියේ '${searchQuery}' සොයමින් පවතී...*` }, { quoted: msg });
+
+            try {
+                // FitGirl සයිට් එකේ Search URL එක නිර්මාණය කිරීම
+                const searchUrl = `https://fitgirl-repacks.site/?s=${encodeURIComponent(searchQuery)}`;
+                
+                const response = await axios.get(searchUrl, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+                });
+
+                const $ = cheerio.load(response.data);
+                const results = [];
+
+                // සයිට් එකේ තියෙන Article tags වලින් Result එක හොයාගැනීම
+                $('article').each((i, el) => {
+                    if (i >= 5) return false; // මුල් ප්‍රතිඵල 5 පමණක් ගැනීම
+                    
+                    const titleElement = $(el).find('h1.entry-title a');
+                    const title = titleElement.text().trim();
+                    const link = titleElement.attr('href');
+                    
+                    if (title && link) {
+                        results.push({ title, link });
+                    }
+                });
+
+                if (results.length === 0) {
+                    return await sock.sendMessage(chatJid, { text: `❌ '${searchQuery}' නමින් ගේම් එකක් FitGirl සයිට් එකේ සොයාගත නොහැකි විය. වෙනත් නමක් උත්සාහ කරන්න.`, edit: searchMsg.key });
+                }
+
+                // ප්‍රතිඵල ලස්සනට සකස් කිරීම
+                let replyText = `*🎯 FITGIRL SEARCH RESULTS*\n\n🔍 *Search:* _${searchQuery}_\n\n`;
+                results.forEach((game, index) => {
+                    replyText += `*${index + 1}.* ${game.title}\n🔗 ${game.link}\n\n`;
+                });
+                replyText += `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
+
+                // ප්‍රතිඵලය යැවීම
+                await sock.sendMessage(chatJid, { text: replyText, edit: searchMsg.key });
+
+            } catch (error) {
+                console.error("FitGirl Search Error:", error.message);
+                await sock.sendMessage(chatJid, { text: `❌ සෙවුම ක්‍රියාත්මක කිරීමේදී දෝෂයක් ඇති විය. අන්තර්ජාල සම්බන්ධතාවය හෝ FitGirl සයිට් එකේ ගැටලුවක් විය හැක.`, edit: searchMsg.key });
+            }
+        }
+
         // 7️⃣ .menu Command 
         else if (text.trim() === '.menu') {
             const menuText = 
@@ -512,6 +566,9 @@ async function startBot() {
                 `┃\n` +
                 `┃ 👥 *.sg [group name] [link 1] [link 2]*\n` +
                 `┃ ↳ _අදාළ ගෲප් එක වෙත ෆයිල්ස් සහ Summary වාර්තාව යවයි._\n` +
+                `┃\n` +
+                `┃ 🔍 *.fg [game name]*\n` +
+                `┃ ↳ _FitGirl වෙබ් අඩවියෙන් ගේම්ස් සර්ච් කර ලින්ක්ස් ලබා දෙයි._\n` +
                 `┃\n` +
                 `┃ 🛑 *.stop*\n` +
                 `┃ ↳ _සිදු වෙමින් පවතින ඕනෑම ක්‍රියාවලියක් නතර කරයි._\n` +
