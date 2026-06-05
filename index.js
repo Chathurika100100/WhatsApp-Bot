@@ -1,6 +1,5 @@
 import 'dotenv/config';
-import { 
-    makeWASocket, 
+import makeWASocket, { 
     useMultiFileAuthState, 
     DisconnectReason, 
     fetchLatestBaileysVersion,
@@ -754,15 +753,31 @@ async function startBot() {
     });
 
     // ═══════════════════════════════════════════════════════════
-    // 📨 MESSAGE HANDLER
+    // 📨 MESSAGE HANDLER WITH DEBUG LOGS
     // ═══════════════════════════════════════════════════════════
     sock.ev.on('messages.upsert', async m => {
-        m.messages.forEach(msg => {
+        console.log(`\n📩 [DEBUG] messages.upsert fired! Type: ${m.type}, Count: ${m.messages.length}`);
+        
+        m.messages.forEach((msg, idx) => {
+            console.log(`📩 [DEBUG] Message ${idx}: key=${JSON.stringify(msg.key)}, message=${msg.message ? 'YES' : 'NO'}`);
             storeMessage(msg);
         });
 
         const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        if (!msg) {
+            console.log('❌ [DEBUG] msg is undefined');
+            return;
+        }
+        
+        if (!msg.message) {
+            console.log('❌ [DEBUG] msg.message is undefined - might be a notification or reaction');
+            return;
+        }
+        
+        if (msg.key.fromMe) {
+            console.log('🤖 [DEBUG] Ignoring own message');
+            return;
+        }
 
         const text = msg.message?.conversation ||
                      msg.message?.extendedTextMessage?.text ||
@@ -774,10 +789,15 @@ async function startBot() {
         const senderJid = msg.key.participant || msg.key.remoteJid || "";
         const chatJid = msg.key.remoteJid;
 
+        console.log(`👤 [DEBUG] Sender: ${senderJid}`);
+        console.log(`💬 [DEBUG] Chat: ${chatJid}`);
+        console.log(`📝 [DEBUG] Text: "${trimmedText}"`);
+
         // ═══════════════════════════════════════════════════════════
         // 🔒 AUTHORIZATION CHECK
         // ═══════════════════════════════════════════════════════════
         if (!isAuthorized(senderJid)) {
+            console.log(`🚫 [DEBUG] UNAUTHORIZED: ${senderJid} is NOT in allowed list`);
             const privateMessage =
                 `🔒 *𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙿𝚁𝙸𝚅𝙰𝚃𝙴 𝚂𝚈𝚂𝚃𝙴𝙼*\n\n` +
                 `❌ *Sorry, Access Denied!*\n` +
@@ -785,17 +805,24 @@ async function startBot() {
                 `_This bot is restricted to authorized users only._\n\n` +
                 `*𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈  RV Games*`;
 
-            return await sock.sendMessage(chatJid, { text: privateMessage }, { quoted: msg });
+            await sock.sendMessage(chatJid, { text: privateMessage }, { quoted: msg });
+            return;
         }
+
+        console.log(`✅ [DEBUG] AUTHORIZED: ${senderJid}`);
 
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const urls = text.match(urlRegex) || [];
         const storedData = userPartLinks.get(chatJid);
 
+        console.log(`🔗 [DEBUG] URLs found: ${urls.length}`);
+        console.log(`📦 [DEBUG] Stored FitGirl data: ${storedData ? 'YES' : 'NO'}`);
+
         // ═══════════════════════════════════════════════════════════
         // 🔢 PRIORITY 1: NUMBER REPLY (FitGirl Search Results)
         // ═══════════════════════════════════════════════════════════
         if (/^\d+$/.test(trimmedText) && userSearchResults.has(chatJid)) {
+            console.log(`🔢 [DEBUG] Number reply detected: ${trimmedText}`);
             const searchData = userSearchResults.get(chatJid);
             const selectedNum = parseInt(trimmedText);
             const selectedResult = searchData.results.find(r => r.number === selectedNum);
@@ -886,6 +913,7 @@ async function startBot() {
         // 📥 PRIORITY 2: .si with Stored FitGirl Links (NO URLs)
         // ═══════════════════════════════════════════════════════════
         if (storedData && trimmedText === '.si' && urls.length === 0) {
+            console.log(`📥 [DEBUG] .si command with stored data`);
             await processFitGirlLinks(sock, msg, senderJid, storedData.links, storedData.gameTitle, chatJid);
             return;
         }
@@ -894,6 +922,7 @@ async function startBot() {
         // 👥 PRIORITY 3: .sg with Stored FitGirl Links (NO URLs)
         // ═══════════════════════════════════════════════════════════
         if (storedData && trimmedText.startsWith('.sg ') && urls.length === 0) {
+            console.log(`👥 [DEBUG] .sg command with stored data`);
             let groupName = trimmedText.replace('.sg ', '').trim();
             if (!groupName) {
                 return await sock.sendMessage(chatJid, { text: '❌ කරුණාකර ගෲප් එකේ නම සඳහන් කරන්න. උදා: .sg pro games' }, { quoted: msg });
@@ -906,6 +935,7 @@ async function startBot() {
         // 🛑 PRIORITY 4: .stop Command
         // ═══════════════════════════════════════════════════════════
         if (trimmedText === '.stop') {
+            console.log(`🛑 [DEBUG] .stop command`);
             if (activeTasks.has(chatJid)) {
                 const task = activeTasks.get(chatJid);
                 task.controller.abort();
@@ -944,12 +974,18 @@ async function startBot() {
         // ═══════════════════════════════════════════════════════════
         // ❌ BLOCK: Non-dot commands (after priority checks)
         // ═══════════════════════════════════════════════════════════
-        if (!trimmedText.startsWith('.')) return;
+        if (!trimmedText.startsWith('.')) {
+            console.log(`⏭️ [DEBUG] Ignoring non-command message: "${trimmedText.substring(0, 30)}"`);
+            return;
+        }
+
+        console.log(`🤖 [DEBUG] Processing command: ${trimmedText}`);
 
         // ═══════════════════════════════════════════════════════════
         // 🎮 .fg COMMAND - FitGirl Repacks Search
         // ═══════════════════════════════════════════════════════════
         if (trimmedText.startsWith('.fg ')) {
+            console.log(`🎮 [DEBUG] .fg command detected`);
             const gameName = trimmedText.replace('.fg ', '').trim();
             if (!gameName) {
                 return await sock.sendMessage(chatJid, {
@@ -1012,6 +1048,7 @@ async function startBot() {
         // 📥 .si COMMAND (with URLs in text)
         // ═══════════════════════════════════════════════════════════
         if (trimmedText.startsWith('.si ')) {
+            console.log(`📥 [DEBUG] .si command with URLs detected`);
             if (urls.length === 0) {
                 return await sock.sendMessage(chatJid, {
                     text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.'
@@ -1029,6 +1066,7 @@ async function startBot() {
         // 👥 .sg COMMAND (with URLs in text)
         // ═══════════════════════════════════════════════════════════
         if (trimmedText.startsWith('.sg ')) {
+            console.log(`👥 [DEBUG] .sg command with URLs detected`);
             if (urls.length === 0) {
                 return await sock.sendMessage(chatJid, {
                     text: '❌ කරුණාකර වලංගු ලින්ක් එකක් ලබා දෙන්න.'
@@ -1117,6 +1155,7 @@ async function startBot() {
         // ⚡ .speed COMMAND
         // ═══════════════════════════════════════════════════════════
         if (trimmedText === '.speed') {
+            console.log(`⚡ [DEBUG] .speed command detected`);
             await sock.sendMessage(chatJid, {
                 text: '⚡ RV Games සර්වර් වේගය පරීක්ෂා කරමින් පවතී...'
             }, { quoted: msg });
@@ -1160,6 +1199,7 @@ async function startBot() {
         // 🧹 .dc COMMAND (Disk Cleaner)
         // ═══════════════════════════════════════════════════════════
         if (trimmedText === '.dc') {
+            console.log(`🧹 [DEBUG] .dc command detected`);
             await sock.sendMessage(chatJid, {
                 text: '🧹 RV Games සර්වර් එකේ තාවකාලික ෆයිල් ඉවත් කරමින් පවතී...'
             }, { quoted: msg });
@@ -1203,6 +1243,7 @@ async function startBot() {
         // 💀 .crash COMMAND
         // ═══════════════════════════════════════════════════════════
         if (trimmedText === '.crash') {
+            console.log(`💀 [DEBUG] .crash command detected`);
             await sock.sendMessage(chatJid, {
                 text: '💀 *RV Games Bot Offline කරනු ලදී.*\n🚫 _සර්වර් එක තවදුරටත් ක්‍රියාත්මක නොවේ._'
             }, { quoted: msg });
@@ -1217,6 +1258,7 @@ async function startBot() {
         // 📜 .menu COMMAND
         // ═══════════════════════════════════════════════════════════
         if (trimmedText === '.menu') {
+            console.log(`📜 [DEBUG] .menu command detected`);
             const menuText =
                 `*👑𝚁𝚅 𝙶𝙰𝙼𝙴𝚂 𝙾𝙵𝙵𝙸𝙲𝙸𝙰𝙻 𝙱𝙾𝚃*👑\n\n` +
                 `╔════════════════════╗\n` +
@@ -1248,10 +1290,14 @@ async function startBot() {
             await sock.sendMessage(chatJid, { text: menuText }, { quoted: msg });
             return;
         }
+
+        console.log(`❓ [DEBUG] Unknown command: "${trimmedText}"`);
     });
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
+        console.log(`🔄 [DEBUG] Connection update: ${connection}`);
+        
         if (connection === 'close') {
             for (const [jid, task] of activeTasks.entries()) {
                 task.controller.abort();
@@ -1267,14 +1313,17 @@ async function startBot() {
             userPartLinks.clear();
 
             const statusCode = lastDisconnect?.error?.output?.statusCode;
+            console.log(`❌ [DEBUG] Connection closed. StatusCode: ${statusCode}`);
+            
             if (statusCode === DisconnectReason.loggedOut || statusCode === 405) {
                 if (fs.existsSync(authFolder)) fs.rmSync(authFolder, { recursive: true, force: true });
                 process.exit(1);
             } else {
+                console.log(`🔄 [DEBUG] Reconnecting in 5 seconds...`);
                 setTimeout(() => startBot(), 5000);
             }
         } else if (connection === 'open') {
-            console.log('🎉 RV Games Bot Connected Successfully!');
+            console.log('🎉 [DEBUG] RV Games Bot Connected Successfully!');
         }
     });
 }
